@@ -1,0 +1,5 @@
+﻿flask
+pywebview
+pymobiledevice3
+requests
+pyinstaller
