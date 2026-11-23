@@ -13,16 +13,17 @@ Aplicación de escritorio para Windows que permite simular y mover la ubicación
 4. **Conexión a internet en la PC (solo la primera vez):** Necesaria durante unos segundos al iniciar la simulación para montar la *Developer Disk Image* de esa versión de iOS.
 
 ## Como usar
-1. Conecta tu iPhone a la PC mediante cable USB, desbloquea la pantalla y toca **Confiar**[cite: 13].
-2. Ejecuta **`GPS_Simulador.exe`**[cite: 13].
-   - *Nota de Windows:* Si aparece la alerta azul de Windows SmartScreen (*"Windows protegió su PC"*), haz clic en **Más información > Ejecutar de todas formas** y acepta los permisos de **Administrador (Sí)**[cite: 13].
-3. Haz clic en cualquier punto del mapa (o arrastra el marcador azul) y presiona **Iniciar Simulación**[cite: 13].
-4. Espera unos segundos hasta que el estado cambie a verde (**`GPS Activo en iPhone`**)[cite: 13].
-5. Mueve tu ubicación haciendo clic en el mapa o usando las teclas **`W`**, **`A`**, **`S`**, **`D`**[cite: 13].
-6. Presiona **Detener** para restaurar el GPS real del dispositivo[cite: 13].
+1. Conecta tu iPhone a la PC mediante cable USB, desbloquea la pantalla y toca **Confiar**.
+2. Ejecuta **`GPS_Simulador.exe`**.
+   - *Nota de Windows:* Si aparece la alerta azul de Windows SmartScreen (*"Windows protegió su PC"*), haz clic en **Más información > Ejecutar de todas formas** y acepta los permisos de **Administrador (Sí)**.
+3. Haz clic en cualquier punto del mapa (o arrastra el marcador azul) y presiona **Iniciar Simulación**.
+4. Espera unos segundos hasta que el estado cambie a verde (**`GPS Activo en iPhone`**).
+5. Mueve tu ubicación haciendo clic en el mapa o usando las teclas **`W`**, **`A`**, **`S`**, **`D`**.
+6. Presiona **Detener** para restaurar el GPS real del dispositivo.
 
 ## Compilar desde el código fuente
-Si deseas modificar el código o compilar tu propio ejecutable[cite: 13]:
+Si deseas modificar el código o compilar tu propio ejecutable:
 
 pip install -r requirements.txt
+
 py -m PyInstaller --noconsole --onefile --uac-admin --recursive-copy-metadata pymobiledevice3 --collect-all pymobiledevice3 --collect-all pytun_pmd3 --collect-all pyimg4 --collect-all qh3 --collect-all uvicorn --collect-all webview --name "GPS_Simulador" GPS_App.py
