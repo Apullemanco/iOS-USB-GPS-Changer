@@ -64,6 +64,11 @@ HTML_PAGE = """
     body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #121212; color: #fff; user-select: none; }
     #bar { padding: 10px 14px; background: #1b1b1f; display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #2c2c35; flex-wrap: wrap; }
     .group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .search-box { position: relative; display: flex; gap: 6px; align-items: center; }
+    #suggest-list { position: absolute; top: 36px; left: 0; width: 320px; max-height: 240px; overflow-y: auto; background: #1b1b1f; border: 1px solid #383846; border-radius: 8px; z-index: 2000; display: none; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    .suggest-item { padding: 8px 10px; font-size: 12px; color: #e4e4e7; cursor: pointer; border-bottom: 1px solid #272730; line-height: 1.35; }
+    .suggest-item:last-child { border-bottom: none; }
+    .suggest-item:hover { background: #2a2a35; color: #fff; }
     button { padding: 7px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12px; background: #2c2c35; color: #f4f4f5; }
     button:hover { filter: brightness(1.1); }
     input, select { padding: 7px 10px; border-radius: 6px; border: 1px solid #32323d; background: #121215; color: #fff; font-size: 12px; }
@@ -86,9 +91,10 @@ HTML_PAGE = """
       <span id="coords">Lat: 25.686600, Lon: -100.316100</span>
       <span id="status-badge">Detenido</span>
     </div>
-    <div class="group">
-      <input id="search-input" type="text" placeholder="Direccion o lat, lon" style="width: 210px;" />
+    <div class="search-box">
+      <input id="search-input" type="text" placeholder="Direccion o lat, lon" autocomplete="off" style="width: 210px;" />
       <button id="btn-search">Buscar</button>
+      <div id="suggest-list"></div>
     </div>
     <div class="group">
       <input id="fav-name" type="text" placeholder="Nombre favorito" style="width: 130px;" />
@@ -122,6 +128,7 @@ HTML_PAGE = """
     let waypointMarkers = [];
     let routeLine = null;
     let favorites = [];
+    let suggestTimer = null;
 
     const map = L.map("map").setView([lat, lon], 15);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
@@ -141,6 +148,40 @@ HTML_PAGE = """
           body: JSON.stringify({ lat, lon })
         });
       }
+    }
+
+    function hideSuggestions() {
+      const box = document.getElementById("suggest-list");
+      box.style.display = "none";
+      box.innerHTML = "";
+    }
+
+    function applyLocation(newLat, newLon, labelText = "") {
+      lat = parseFloat(newLat);
+      lon = parseFloat(newLon);
+      map.setView([lat, lon], 16);
+      sendMove(true);
+      if (labelText) {
+        document.getElementById("search-input").value = labelText;
+      }
+      hideSuggestions();
+    }
+
+    function renderSuggestions(items) {
+      const box = document.getElementById("suggest-list");
+      box.innerHTML = "";
+      if (!items || items.length === 0) {
+        box.style.display = "none";
+        return;
+      }
+      items.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "suggest-item";
+        div.textContent = item.label;
+        div.onclick = () => applyLocation(item.lat, item.lon, item.label);
+        box.appendChild(div);
+      });
+      box.style.display = "block";
     }
 
     function redrawRoute() {
@@ -178,6 +219,27 @@ HTML_PAGE = """
         renderFavorites();
       }).catch(() => {});
     }
+
+    document.getElementById("search-input").addEventListener("input", (e) => {
+      const q = e.target.value.trim();
+      if (suggestTimer) clearTimeout(suggestTimer);
+      if (q.length < 2) {
+        hideSuggestions();
+        return;
+      }
+      suggestTimer = setTimeout(() => {
+        fetch(`/suggest?q=${encodeURIComponent(q)}`)
+          .then(r => r.json())
+          .then(d => renderSuggestions(d.results || []))
+          .catch(() => hideSuggestions());
+      }, 300);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".search-box")) {
+        hideSuggestions();
+      }
+    });
 
     map.on("click", (e) => {
       lat = e.latlng.lat;
@@ -217,10 +279,7 @@ HTML_PAGE = """
         body: JSON.stringify({ query: q })
       }).then(r => r.json()).then(d => {
         if (d.ok) {
-          lat = d.lat;
-          lon = d.lon;
-          map.setView([lat, lon], 16);
-          sendMove(true);
+          applyLocation(d.lat, d.lon);
         }
       }).catch(() => {});
     };
@@ -241,10 +300,7 @@ HTML_PAGE = """
     document.getElementById("btn-fav-go").onclick = () => {
       const idx = parseInt(document.getElementById("fav-select").value, 10);
       if (!isNaN(idx) && favorites[idx]) {
-        lat = favorites[idx].lat;
-        lon = favorites[idx].lon;
-        map.setView([lat, lon], 16);
-        sendMove(true);
+        applyLocation(favorites[idx].lat, favorites[idx].lon);
       }
     };
 
@@ -554,6 +610,30 @@ def move():
         state["lat"] = float(data["lat"])
         state["lon"] = float(data["lon"])
     return jsonify({"ok": True})
+
+@app.route("/suggest")
+def suggest_places():
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify({"results": []})
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": q, "format": "json", "limit": 5},
+            headers={"User-Agent": "GPS-Simulador/1.0"},
+            timeout=5,
+        )
+        raw = resp.json()
+        results = []
+        for item in raw:
+            results.append({
+                "label": item.get("display_name", ""),
+                "lat": float(item["lat"]),
+                "lon": float(item["lon"]),
+            })
+        return jsonify({"results": results})
+    except Exception:
+        return jsonify({"results": []})
 
 @app.route("/search", methods=["POST"])
 def search_place():
