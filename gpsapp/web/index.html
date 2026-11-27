@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulador GPS · iOS GPS Simulator</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script>/*__CONFIG__*/</script>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- The menu button and the panel are the same glass element: it expands / compresses between both. -->
+  <aside id="sidebar">
+    <button id="menu-pill" class="menu-pill" type="button" aria-controls="sidebar-scroll" aria-expanded="true" tabindex="-1" data-i18n-title="show_menu"><span data-i18n="app_title"></span></button>
+    <div id="sidebar-scroll">
+      <header class="header">
+        <span class="app-title" data-i18n="app_title"></span>
+        <span>
+          <button id="btn-help" class="btn btn-plain" type="button" data-i18n="help"></button>
+          <button id="btn-hide-bar" class="btn btn-plain" type="button" data-i18n="hide"></button>
+        </span>
+      </header>
+
+      <div class="search-wrap">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5 17 17"/></svg>
+        <input id="search-input" type="text" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" />
+        <button id="btn-search" class="search-go" type="button" data-i18n-aria="go">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+        </button>
+        <div id="suggest-list" role="listbox" hidden></div>
+      </div>
+
+      <!-- Status / main controls -->
+      <section class="card">
+        <div class="status-line">
+          <div id="status-pill" class="status-pill"><span class="dot"></span><span id="status-text"></span></div>
+          <button id="coords" class="coords" type="button" data-i18n-title="copy_coords"></button>
+        </div>
+        <div id="device-line" class="caption"></div>
+        <div id="hdg" class="caption hdg"></div>
+        <div class="row">
+          <button id="btn-start" class="btn btn-primary grow" type="button" data-i18n="start"></button>
+          <button id="btn-stop" class="btn btn-stop grow" type="button" data-i18n="stop"></button>
+        </div>
+        <div class="caption" data-i18n="stop_hint"></div>
+        <div class="segmented" data-group="layer">
+          <button class="seg-opt active" data-value="map" type="button" data-i18n="layer_map"></button>
+          <button class="seg-opt" data-value="sat" type="button" data-i18n="layer_sat"></button>
+        </div>
+        <div id="err-box" class="err-box" hidden>
+          <span id="err-text"></span>
+          <button id="btn-err-action" class="btn btn-plain" type="button" hidden></button>
+        </div>
+      </section>
+
+      <!-- Route -->
+      <details class="section" open>
+        <summary><span data-i18n="sec_route"></span><span id="route-info" class="sec-sub"></span></summary>
+        <div class="sec-body">
+          <div class="segmented" data-group="mode">
+            <button class="seg-opt" data-value="walk" type="button" data-i18n="mode_walk"></button>
+            <button class="seg-opt" data-value="bike" type="button" data-i18n="mode_bike"></button>
+            <button class="seg-opt active" data-value="car" type="button" data-i18n="mode_car"></button>
+          </div>
+          <button id="btn-route-add" class="btn" type="button"></button>
+          <div class="row">
+            <button id="btn-route-undo" class="btn grow" type="button" data-i18n="undo"></button>
+            <button id="btn-route-clear" class="btn btn-stop grow" type="button" data-i18n="clear"></button>
+          </div>
+          <div class="row">
+            <button id="btn-route-run" class="btn btn-primary grow" type="button" data-i18n="route_start"></button>
+            <button id="btn-route-pause" class="btn grow" type="button" data-i18n="pause" disabled></button>
+          </div>
+          <div class="row">
+            <button id="btn-gpx-import" class="btn grow" type="button" data-i18n="gpx_import"></button>
+            <button id="btn-gpx-export" class="btn grow" type="button" data-i18n="gpx_export"></button>
+            <input id="gpx-file" type="file" accept=".gpx" hidden />
+          </div>
+          <div class="list">
+            <div class="cell"><span data-i18n="speed"></span><span id="speed-val" class="val"></span></div>
+            <div class="cell slider"><input id="route-speed" type="range" min="1" max="150" step="1" value="45" data-i18n-aria="speed" /></div>
+            <label class="cell"><span data-i18n="streets"></span><span class="switch"><input id="route-streets" type="checkbox" role="switch" checked /><i></i></span></label>
+            <label class="cell"><span data-i18n="variation"></span><span class="switch"><input id="route-jitter" type="checkbox" role="switch" checked /><i></i></span></label>
+            <label class="cell"><span data-i18n="loop"></span><span class="switch"><input id="route-loop" type="checkbox" role="switch" /><i></i></span></label>
+            <div class="cell"><span data-i18n="dwell"></span><span id="dwell-val" class="val"></span></div>
+            <div class="cell slider"><input id="route-dwell" type="range" min="0" max="300" step="5" value="0" data-i18n-aria="dwell" /></div>
+          </div>
+          <div id="route-stats" class="caption"></div>
+        </div>
+      </details>
+
+      <!-- Favorites -->
+      <details class="section">
+        <summary><span data-i18n="sec_favs"></span><span id="favs-count" class="sec-sub">0</span></summary>
+        <div class="sec-body">
+          <input id="fav-folder" class="field" list="fav-folders" type="text" data-i18n-ph="folder_ph" /><datalist id="fav-folders"></datalist>
+          <div class="row">
+            <input id="fav-name" class="field grow" type="text" data-i18n-ph="place_ph" />
+            <button id="btn-fav-save" class="btn btn-primary" type="button" data-i18n="save"></button>
+          </div>
+          <div class="row">
+            <select id="fav-select" class="field grow"></select>
+            <button id="btn-fav-go" class="btn" type="button" data-i18n="go"></button>
+            <button id="btn-fav-del" class="btn btn-stop" type="button" data-i18n="delete"></button>
+          </div>
+          <div class="row">
+            <button id="btn-fav-import" class="btn grow" type="button" data-i18n="import"></button>
+            <button id="btn-fav-export" class="btn grow" type="button" data-i18n="export"></button>
+            <input id="fav-file" type="file" accept=".json" hidden />
+          </div>
+        </div>
+      </details>
+
+      <!-- History -->
+      <details class="section" id="hist-sec">
+        <summary><span data-i18n="sec_history"></span><span id="hist-count" class="sec-sub">0</span></summary>
+        <div class="sec-body">
+          <button id="btn-hist-back" class="btn" type="button" data-i18n="hist_back"></button>
+          <div id="hist-list" class="list"></div>
+        </div>
+      </details>
+
+      <!-- Controls -->
+      <details class="section">
+        <summary><span data-i18n="sec_controls"></span><span id="step-info" class="sec-sub"></span></summary>
+        <div class="sec-body">
+          <div class="segmented" data-group="step">
+            <button class="seg-opt" data-value="1" type="button" data-i18n="step_1"></button>
+            <button class="seg-opt active" data-value="2" type="button" data-i18n="step_2"></button>
+            <button class="seg-opt" data-value="3" type="button" data-i18n="step_3"></button>
+          </div>
+          <div class="row">
+            <button id="btn-center" class="btn grow" type="button" data-i18n="center"></button>
+            <button id="btn-copy" class="btn grow" type="button" data-i18n="copy"></button>
+          </div>
+          <div class="list">
+            <label class="cell"><span data-i18n="follow"></span><span class="switch"><input id="follow-marker" type="checkbox" role="switch" /><i></i></span></label>
+            <label class="cell"><span data-i18n="glass_effect"></span><span class="switch"><input id="glass-effect" type="checkbox" role="switch" checked /><i></i></span></label>
+          </div>
+          <div class="dpad">
+            <button class="btn" data-dir="n" type="button" data-i18n-aria="north">↑</button>
+            <button class="btn" data-dir="s" type="button" data-i18n-aria="south">↓</button>
+            <button class="btn" data-dir="w" type="button" data-i18n-aria="west">←</button>
+            <button class="btn" data-dir="e" type="button" data-i18n-aria="east">→</button>
+          </div>
+          <div class="caption" data-i18n="keys_local"></div>
+          <div class="caption" data-i18n="keys_global"></div>
+          <div class="segmented" data-group="lang">
+            <button class="seg-opt active" data-value="es" type="button">Español</button>
+            <button class="seg-opt" data-value="en" type="button">English</button>
+          </div>
+          <div id="version" class="caption"></div>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Setup assistant -->
+  <div id="wizard" class="wizard" hidden>
+    <div class="wiz-card" role="dialog" aria-modal="true" aria-labelledby="wiz-title">
+      <h2 id="wiz-title" data-i18n="wiz_title"></h2>
+      <ol class="wiz-steps">
+        <li id="w-driver"><i></i><span data-i18n-html="wiz_driver"></span></li>
+        <li id="w-device"><i></i><span data-i18n-html="wiz_device"></span></li>
+        <li id="w-devmode"><i></i><span data-i18n-html="wiz_devmode"></span></li>
+        <li id="w-start"><i></i><span data-i18n-html="wiz_start"></span></li>
+      </ol>
+      <p class="wiz-note" data-i18n="wiz_note"></p>
+      <button id="btn-wiz-ok" class="btn btn-primary" type="button" data-i18n="got_it"></button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/liquid-glass.js"></script>
+  <script src="/static/i18n.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

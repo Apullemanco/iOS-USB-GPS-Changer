@@ -1,0 +1,19 @@
+﻿# build output
+build/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# personal data - never publish your own places/history
+favoritos.json
+historial.json
+favorites.json
+history.json
+config.json
+rutas/
+
+# local backups / OS files
+legacy/
+desktop.ini

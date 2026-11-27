@@ -1,5 +1,5 @@
-﻿flask
-pywebview
-pymobiledevice3
-requests
-pyinstaller
+﻿# pymobiledevice3 changes its API often; this range is the one the code is tested with.
+pymobiledevice3>=11.66,<12
+flask>=3.0
+pywebview>=5.0
+requests>=2.31
