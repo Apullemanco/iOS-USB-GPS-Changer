@@ -7,6 +7,7 @@ import json
 import math
 import os
 import pkgutil
+import re
 import sys
 import threading
 import time
@@ -59,771 +60,416 @@ HTML_PAGE = """
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>GPS Simulador</title>
+  <meta name="color-scheme" content="light dark" />
+  <title>Simulador GPS</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
-      --glass-tint: rgba(215, 224, 235, 0.26);
-      --layer-tint: rgba(255, 255, 255, 0.26);
-      --control-bg: rgba(255, 255, 255, 0.34);
-      --control-hover: rgba(255, 255, 255, 0.52);
-      --hairline: rgba(15, 23, 42, 0.09);
-      --text-primary: #0f172a;
-      --text-secondary: rgba(15, 23, 42, 0.64);
-      --blue: #007aff;
-      --blue-tint: rgba(0, 122, 255, 0.16);
-      --green: #28cd41;
-      --red: #ff3b30;
-      --red-tint: rgba(255, 59, 48, 0.16);
-      --amber: #ff9f0a;
-      --font-sf: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --blue: #007aff; --green: #34c759; --red: #ff3b30; --orange: #ff9500;
+      --green-t: #248a3d; --orange-t: #b25f00;
+      --label: rgba(0,0,0,.88); --label2: rgba(60,60,67,.62); --sep: rgba(60,60,67,.18);
+      --g-panel: rgba(255,255,255,.40); --g-card: rgba(255,255,255,.36); --g-ctrl: rgba(255,255,255,.58);
+      --well: rgba(120,120,128,.16); --thumb: rgba(255,255,255,.94);
+      --g-blur: 26px; --g-sat: 180%;
+      --r-panel: 32px; --r-card: 24px; --r-ctrl: 16px;
+      --spring: cubic-bezier(.34,1.56,.64,1); --ease: cubic-bezier(.25,.1,.25,1);
+      --shadow: 0 8px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.06);
+      --hl: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -1px 0 rgba(255,255,255,.1), inset 0 0 12px rgba(255,255,255,.08);
+      --pop: rgba(255,255,255,.94);
     }
 
     * { box-sizing: border-box; }
-
     body {
-      margin: 0;
-      font-family: var(--font-sf);
-      color: var(--text-primary);
-      background: #dce2ea;
-      user-select: none;
-      overflow: hidden;
-      height: 100vh;
-      width: 100vw;
-      -webkit-font-smoothing: antialiased;
+      margin: 0; height: 100vh; width: 100vw; overflow: hidden;
+      font: 400 15px/1.3 var(--font); color: var(--label);
+      background: #e5e5ea; user-select: none; -webkit-font-smoothing: antialiased;
       font-variant-numeric: tabular-nums;
     }
+    input, select { user-select: text; }
+    #map-wrap { position: fixed; inset: 0; }
+    #map { width: 100%; height: 100%; }
 
-    #map-wrap {
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-    }
-
-    #map {
-      width: 100%;
-      height: 100%;
-    }
-
+    /* ---------- Liquid Glass ---------- */
     #sidebar-shell {
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      width: 304px;
-      max-height: calc(100vh - 28px);
-      z-index: 1000;
-      border-radius: 26px;
-      transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+      position: fixed; top: 14px; left: 14px; width: 332px; max-height: calc(100vh - 28px);
+      z-index: 1000; border-radius: var(--r-panel); background: var(--g-panel);
+      -webkit-backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(1.05);
+      backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)) brightness(1.05);
+      box-shadow: var(--shadow), var(--hl);
+      display: flex; flex-direction: column; overflow: hidden;
+      transition: transform .5s var(--spring), opacity .25s var(--ease);
     }
-
-    #sidebar-shell.collapsed {
-      transform: translateX(calc(-100% - 28px));
-      opacity: 0;
-      pointer-events: none;
+    #sidebar-shell.refract {
+      backdrop-filter: url(#liquid) blur(var(--g-blur)) saturate(var(--g-sat)) brightness(1.05);
     }
-
-    .lg-lens {
-      position: relative;
-      width: 100%;
-      max-height: calc(100vh - 28px);
-      border-radius: 26px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      box-shadow:
-        0 20px 48px rgba(15, 23, 42, 0.18),
-        0 2px 8px rgba(15, 23, 42, 0.08),
-        inset 0 1px 0.5px rgba(255, 255, 255, 0.85),
-        inset 0 -1px 0.5px rgba(255, 255, 255, 0.35);
+    #sidebar-shell.collapsed { transform: translateX(calc(-100% - 28px)); opacity: 0; pointer-events: none; }
+    #sidebar-shell::after {
+      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: radial-gradient(280px circle at var(--mx, 30%) var(--my, 0%), rgba(255,255,255,.28), transparent 62%);
+      mix-blend-mode: soft-light;
     }
-
-    .lg-optical-base {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(
-        160deg,
-        rgba(235, 241, 248, 0.34) 0%,
-        rgba(195, 206, 220, 0.24) 55%,
-        rgba(175, 188, 204, 0.28) 100%
-      );
-      backdrop-filter: blur(15px) saturate(215%) brightness(1.04);
-      -webkit-backdrop-filter: blur(15px) saturate(215%) brightness(1.04);
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    .lg-edge-refraction {
-      position: absolute;
-      inset: 0;
-      backdrop-filter: url(#lg-lens-filter);
-      -webkit-backdrop-filter: url(#lg-lens-filter);
-      opacity: 0.72;
-      pointer-events: none;
-      z-index: 1;
-    }
-
-    .lg-specular-rim {
-      position: absolute;
-      inset: 0;
-      border-radius: 26px;
-      padding: 1px;
-      pointer-events: none;
-      background: linear-gradient(
-        138deg,
-        rgba(255, 255, 255, 0.92) 0%,
-        rgba(255, 255, 255, 0.25) 32%,
-        rgba(255, 255, 255, 0.08) 68%,
-        rgba(255, 255, 255, 0.65) 100%
-      );
+    /* borde especular */
+    #sidebar-shell::before, #btn-toggle-bar::before, .card::before, .section::before,
+    .search-wrap::before, .btn:not(.btn-plain)::before, .leaflet-bar::before {
+      content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; z-index: 3;
+      background: linear-gradient(135deg, rgba(255,255,255,.85), rgba(255,255,255,0) 38%, rgba(255,255,255,0) 62%, rgba(255,255,255,.45));
       -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-      -webkit-mask-composite: xor;
-      mask-composite: exclude;
-      z-index: 3;
+      -webkit-mask-composite: xor; mask-composite: exclude;
     }
-
-    .lg-specular-glow {
-      position: absolute;
-      inset: 0;
-      border-radius: 26px;
-      pointer-events: none;
-      z-index: 2;
-      transition: background 0.12s ease-out;
-    }
-
-    .lg-body {
-      position: relative;
-      z-index: 4;
-      display: flex;
-      flex-direction: column;
-      max-height: calc(100vh - 28px);
-      width: 100%;
-    }
-
     #sidebar-scroll {
-      overflow-y: auto;
-      padding: 13px;
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
+      overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+      scrollbar-width: none; position: relative; z-index: 1;
     }
+    #sidebar-scroll::-webkit-scrollbar { display: none; }
 
-    #sidebar-scroll::-webkit-scrollbar {
-      width: 0;
-      height: 0;
-    }
+    .header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 2px; }
+    .app-title { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
 
-    .header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1px 4px;
-    }
+    .card, .section { position: relative; border-radius: var(--r-card); background: var(--g-card); box-shadow: var(--hl); }
+    .card { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .card-title { font-size: 15px; font-weight: 600; }
 
-    .app-title {
-      font-size: 15.5px;
-      font-weight: 600;
-      letter-spacing: -0.024em;
-      color: var(--text-primary);
-      text-shadow: 0 1px 10px rgba(255, 255, 255, 0.65);
+    /* ---------- Botones ---------- */
+    .btn {
+      position: relative; height: 40px; padding: 0 16px; border: 0; border-radius: 999px;
+      font: 600 15px/1 var(--font); color: var(--blue); background: var(--g-ctrl);
+      box-shadow: var(--hl), 0 1px 3px rgba(0,0,0,.06); cursor: pointer; white-space: nowrap;
+      transition: transform .35s var(--spring), background .2s var(--ease), filter .2s var(--ease);
     }
+    .btn:active { transform: scale(.96); filter: brightness(1.07); }
+    .btn-primary { color: #fff; background: linear-gradient(180deg, #3d9bff, var(--blue)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 4px 14px rgba(0,122,255,.32); }
+    .btn-stop { color: var(--red); background: rgba(255,59,48,.14); }
+    .btn-plain { background: transparent; box-shadow: none; padding: 0 10px; height: 32px; font-weight: 500; }
+    .btn:focus-visible, .seg-opt:focus-visible, .search-go:focus-visible { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
+    @media (hover: hover) { .btn:hover { filter: brightness(1.05); } .btn-plain:hover { background: var(--well); } }
 
-    .pill-close {
-      border: none;
-      background: var(--control-bg);
-      color: var(--text-secondary);
-      font-family: var(--font-sf);
-      font-size: 11.5px;
-      font-weight: 500;
-      padding: 4px 10px;
-      border-radius: 999px;
-      cursor: pointer;
-      transition: background 0.15s ease, color 0.15s ease;
-    }
-    .pill-close:hover {
-      background: var(--control-hover);
-      color: var(--text-primary);
-    }
-
-    .search-pill {
-      position: relative;
-      display: flex;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.42);
-      border-radius: 999px;
-      padding: 0 6px 0 12px;
-      height: 33px;
-      box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
-      transition: background 0.16s ease, box-shadow 0.16s ease;
-    }
-    .search-pill:focus-within {
-      background: rgba(255, 255, 255, 0.78);
-      box-shadow: 0 0 0 2.5px rgba(0, 122, 255, 0.25);
-    }
-
-    .search-pill input {
-      border: none;
-      background: transparent;
-      flex: 1;
-      min-width: 0;
-      font-family: var(--font-sf);
-      font-size: 12.5px;
-      color: var(--text-primary);
-      outline: none;
-    }
-    .search-pill input::placeholder {
-      color: var(--text-secondary);
-    }
-
-    .search-go {
-      border: none;
-      background: var(--blue-tint);
-      color: var(--blue);
-      font-family: var(--font-sf);
-      font-size: 11.5px;
-      font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 999px;
-      cursor: pointer;
-      transition: background 0.15s ease;
-    }
-    .search-go:hover {
-      background: rgba(0, 122, 255, 0.24);
-    }
-
-    #suggest-list {
-      position: absolute;
-      top: 38px;
-      left: 0;
-      right: 0;
-      max-height: 180px;
-      overflow-y: auto;
-      background: rgba(248, 250, 252, 0.88);
-      backdrop-filter: blur(24px) saturate(190%);
-      -webkit-backdrop-filter: blur(24px) saturate(190%);
-      border-radius: 16px;
-      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18), inset 0 0.5px 0 rgba(255, 255, 255, 0.9);
-      z-index: 2000;
-      display: none;
-    }
-
-    .suggest-item {
-      padding: 8px 12px;
-      font-size: 12px;
-      color: var(--text-primary);
-      cursor: pointer;
-      border-bottom: 0.5px solid var(--hairline);
-      line-height: 1.3;
-    }
-    .suggest-item:last-child { border-bottom: none; }
-    .suggest-item:hover {
-      background: var(--blue-tint);
-    }
-
-    .glass-group {
-      background: var(--layer-tint);
-      border-radius: 18px;
-      box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.65);
-      overflow: hidden;
-    }
-
-    .group-inner {
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .status-line {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      padding: 0 2px;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--amber);
-      box-shadow: 0 0 6px rgba(255, 159, 10, 0.65);
-    }
-    .dot.active {
-      background: var(--green);
-      box-shadow: 0 0 8px rgba(40, 205, 65, 0.75);
-    }
-
-    .coords {
-      font-family: "SF Mono", ui-monospace, Menlo, monospace;
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      cursor: pointer;
-    }
-    .coords:hover {
-      color: var(--blue);
-    }
-
-    .row {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-    }
+    .row { display: flex; gap: 8px; align-items: center; }
     .row > * { min-width: 0; }
     .grow { flex: 1; }
 
-    .btn-pill {
-      border: none;
-      border-radius: 999px;
-      height: 30px;
-      padding: 0 11px;
-      font-family: var(--font-sf);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      background: var(--control-bg);
-      color: var(--text-primary);
-      cursor: pointer;
-      transition: background 0.14s ease, transform 0.08s ease;
+    /* ---------- Búsqueda ---------- */
+    .search-wrap {
+      position: relative; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 7px 0 15px;
+      border-radius: 999px; background: var(--g-ctrl); box-shadow: var(--hl); color: var(--label2);
+      transition: box-shadow .2s var(--ease);
     }
-    .btn-pill:hover {
-      background: var(--control-hover);
+    .search-wrap:focus-within { box-shadow: var(--hl), 0 0 0 3px rgba(0,122,255,.3); }
+    .search-wrap input { flex: 1; min-width: 0; border: 0; background: transparent; outline: 0; font: 400 15px var(--font); color: var(--label); }
+    input::placeholder { color: var(--label2); }
+    .search-go {
+      flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; display: grid; place-items: center;
+      color: #fff; background: var(--blue); cursor: pointer; transition: transform .35s var(--spring);
     }
-    .btn-pill:active {
-      transform: scale(0.97);
+    .search-go:active { transform: scale(.92); }
+    #suggest-list {
+      position: absolute; top: 54px; left: 0; right: 0; max-height: 200px; overflow-y: auto; display: none; z-index: 2000;
+      background: var(--pop); border-radius: 20px; box-shadow: var(--shadow); color: var(--label); scrollbar-width: none;
     }
+    .suggest-item { padding: 10px 14px; font-size: 13px; cursor: pointer; line-height: 1.35; border-bottom: .5px solid var(--sep); }
+    .suggest-item:last-child { border-bottom: 0; }
+    @media (hover: hover) { .suggest-item:hover { background: rgba(0,122,255,.12); } }
 
-    .btn-primary {
-      background: var(--blue);
-      color: #ffffff;
-      box-shadow: 0 2px 8px rgba(0, 122, 255, 0.28);
+    /* ---------- Estado ---------- */
+    .status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .status-pill {
+      --c: var(--orange); --t: var(--orange-t);
+      display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 10px; border-radius: 999px;
+      font-size: 13px; font-weight: 600; color: var(--t);
+      background: color-mix(in srgb, var(--c) 16%, transparent);
     }
-    .btn-primary:hover {
-      background: #006be0;
-    }
-
-    .btn-tint-blue {
-      background: var(--blue-tint);
-      color: var(--blue);
-    }
-    .btn-tint-blue:hover {
-      background: rgba(0, 122, 255, 0.24);
-    }
-
-    .btn-tint-red {
-      background: var(--red-tint);
-      color: var(--red);
-    }
-    .btn-tint-red:hover {
-      background: rgba(255, 59, 48, 0.24);
-    }
-
-    .segmented {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      background: rgba(255, 255, 255, 0.24);
-      padding: 2.5px;
-      border-radius: 999px;
-      height: 29px;
-    }
-    .segmented.two {
-      grid-template-columns: repeat(2, 1fr);
-    }
-
-    .seg-opt {
-      border: none;
-      background: transparent;
-      border-radius: 999px;
-      font-family: var(--font-sf);
-      font-size: 11.5px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
-    }
-    .seg-opt:hover {
-      color: var(--text-primary);
-    }
-    .seg-opt.active {
-      background: rgba(255, 255, 255, 0.85);
-      color: var(--text-primary);
-      font-weight: 600;
-      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
-    }
-
-    details.section {
-      background: var(--layer-tint);
-      border-radius: 18px;
-      box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.65);
-      overflow: hidden;
-    }
-
-    details.section summary {
-      list-style: none;
-      padding: 9px 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 12.5px;
-      font-weight: 600;
-      letter-spacing: -0.01em;
-      cursor: pointer;
-    }
-    details.section summary::-webkit-details-marker {
-      display: none;
-    }
-
-    .sec-sub {
-      font-size: 11.5px;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-
-    .sec-body {
-      padding: 0 10px 10px 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-
-    .field-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-primary);
-      padding: 2px 2px 0 2px;
-    }
-
-    .num-input, .text-input, .select-input {
-      border: none;
-      background: var(--control-bg);
-      border-radius: 999px;
-      height: 29px;
-      padding: 0 11px;
-      font-family: var(--font-sf);
-      font-size: 12px;
-      color: var(--text-primary);
-      outline: none;
-    }
-    .num-input:focus, .text-input:focus, .select-input:focus {
-      background: rgba(255, 255, 255, 0.82);
-      box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.25);
-    }
-
-    .check-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 11.5px;
-      padding: 0 2px;
-    }
-
-    .check {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-weight: 500;
-      color: var(--text-primary);
-      cursor: pointer;
-    }
-    .check input {
-      accent-color: var(--blue);
-      width: 14px;
-      height: 14px;
-      margin: 0;
-      cursor: pointer;
-    }
-
-    .caption {
-      font-size: 11px;
-      color: var(--text-secondary);
-      padding: 0 2px;
-    }
-
-    #err {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--red);
-      line-height: 1.35;
-      padding: 0 2px;
-    }
+    .status-pill:has(.dot.active) { --c: var(--green); --t: var(--green-t); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+    .dot.active { animation: pulse 2s ease-out infinite; }
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+    .coords { font-size: 13px; color: var(--label2); cursor: pointer; white-space: nowrap; margin-left: auto; transition: color .2s; }
+    .coords:hover { color: var(--blue); }
+    #err { font-size: 13px; color: var(--red); line-height: 1.35; }
     #err:empty { display: none; }
 
-    #btn-toggle-bar {
-      position: fixed;
-      top: 14px;
-      left: 14px;
-      z-index: 900;
-      border: none;
-      background: rgba(220, 228, 238, 0.34);
-      backdrop-filter: blur(18px) saturate(210%);
-      -webkit-backdrop-filter: blur(18px) saturate(210%);
-      color: var(--text-primary);
-      padding: 7px 15px;
-      border-radius: 999px;
-      font-family: var(--font-sf);
-      font-size: 12.5px;
-      font-weight: 600;
-      cursor: pointer;
-      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    /* ---------- Segmented con indicador deslizante ---------- */
+    .segmented { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; height: 38px; border-radius: 999px; background: var(--well); }
+    .thumb {
+      position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 999px; background: var(--thumb); pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.9);
+      transition: transform .45s var(--spring), width .3s var(--ease);
     }
+    .seg-opt {
+      position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; cursor: pointer;
+      font: 500 13.5px var(--font); color: var(--label); transition: font-weight .2s, color .2s;
+    }
+    .seg-opt.active { font-weight: 600; }
 
-    .leaflet-control-zoom {
-      margin-top: 14px !important;
-      margin-right: 14px !important;
-      border: none !important;
-      border-radius: 999px !important;
-      overflow: hidden;
-      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.14) !important;
+    /* ---------- Secciones ---------- */
+    .section { interpolate-size: allow-keywords; }
+    .section summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    .section summary::-webkit-details-marker { display: none; }
+    .section summary::after {
+      content: ""; width: 8px; height: 14px; background: var(--label2); transition: transform .4s var(--spring);
+      -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 14'%3E%3Cpath d='M1.5 1.5 6.5 7l-5 5.5' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+              mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 14'%3E%3Cpath d='M1.5 1.5 6.5 7l-5 5.5' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
     }
-    .leaflet-control-zoom a {
-      background: rgba(245, 248, 252, 0.72) !important;
-      backdrop-filter: blur(16px) saturate(190%);
-      color: var(--text-primary) !important;
-      border-bottom: 0.5px solid var(--hairline) !important;
+    .section[open] summary::after { transform: rotate(90deg); }
+    .section::details-content { height: 0; overflow: hidden; transition: height .4s var(--ease), content-visibility .4s allow-discrete; }
+    .section[open]::details-content { height: auto; }
+    .sec-sub { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--label2); }
+    .sec-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+    /* ---------- Lista tipo Ajustes ---------- */
+    .list { border-radius: var(--r-ctrl); background: var(--g-ctrl); box-shadow: var(--hl); }
+    .cell { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 46px; padding: 0 14px; font-size: 15px; }
+    .cell + .cell::before { content: ""; position: absolute; top: 0; left: 14px; right: 0; height: .5px; background: var(--sep); }
+    .cell.slider { min-height: 38px; padding-bottom: 4px; }
+    label.cell { cursor: pointer; }
+    .val { padding: 4px 11px; border-radius: 999px; background: var(--well); font-size: 14px; font-weight: 600; }
+
+    .switch { position: relative; width: 51px; height: 31px; flex: none; }
+    .switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
+    .switch i { position: absolute; inset: 0; border-radius: 999px; background: rgba(120,120,128,.32); transition: background .3s var(--ease); }
+    .switch i::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 999px; background: #fff;
+      box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+      transition: transform .4s var(--spring), width .2s var(--ease);
     }
+    .switch input:checked + i { background: var(--green); }
+    .switch input:checked + i::after { transform: translateX(20px); }
+    .switch input:active + i::after { width: 34px; }
+    .switch input:checked:active + i::after { transform: translateX(13px); }
+    .switch input:focus-visible + i { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
+
+    input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; --p: 30%; }
+    input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--blue) var(--p), rgba(120,120,128,.32) var(--p)); }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%; background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25), 0 0 0 .5px rgba(0,0,0,.06); transition: transform .3s var(--spring);
+    }
+    input[type=range]:active::-webkit-slider-thumb { transform: scale(1.1); }
+
+    .field {
+      height: 40px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--g-ctrl); box-shadow: var(--hl);
+      font: 400 15px var(--font); color: var(--label); outline: 0; min-width: 0; transition: box-shadow .2s var(--ease);
+    }
+    .field:focus { box-shadow: var(--hl), 0 0 0 3px rgba(0,122,255,.3); }
+    select.field {
+      -webkit-appearance: none; appearance: none; padding-right: 32px; background-repeat: no-repeat; background-position: right 13px center;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='16' viewBox='0 0 10 16'%3E%3Cpath d='M2 6l3-3 3 3M2 10l3 3 3-3' fill='none' stroke='%238e8e93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+    .caption { font-size: 12px; color: var(--label2); padding: 0 2px; }
+
+    #btn-toggle-bar {
+      position: fixed; top: 14px; left: 14px; z-index: 900; height: 40px; padding: 0 18px; border: 0; border-radius: 999px;
+      font: 600 15px var(--font); color: var(--label); background: var(--g-panel); cursor: pointer;
+      -webkit-backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat)); backdrop-filter: blur(var(--g-blur)) saturate(var(--g-sat));
+      box-shadow: var(--shadow), var(--hl); transition: transform .35s var(--spring);
+    }
+    #btn-toggle-bar:active { transform: scale(.96); }
+
+    /* ---------- Leaflet ---------- */
+    .leaflet-control-zoom { margin: 14px 14px 0 0 !important; }
+    .leaflet-bar { position: relative; border: 0 !important; border-radius: 20px !important; overflow: hidden; background: var(--g-panel) !important;
+      -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); box-shadow: var(--shadow), var(--hl) !important; }
+    .leaflet-bar a { background: transparent !important; color: var(--label) !important; border-bottom: .5px solid var(--sep) !important; width: 40px !important; height: 40px !important; line-height: 40px !important; }
+    .leaflet-bar a:last-child { border-bottom: 0 !important; }
+
+    /* ---------- Accesibilidad ---------- */
+    @media (prefers-reduced-transparency: reduce) {
+      :root { --g-panel: rgba(246,246,248,.97); --g-card: rgba(255,255,255,.7); --g-ctrl: rgba(255,255,255,.92); --g-blur: 0px; }
+      #sidebar-shell, #btn-toggle-bar, .leaflet-bar { -webkit-backdrop-filter: none; backdrop-filter: none; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition-duration: .01ms !important; } }
+    @media (prefers-contrast: more) {
+      :root { --sep: rgba(60,60,67,.55); --label2: rgba(60,60,67,.95); }
+      .card, .section, .search-wrap, .list { outline: 1px solid var(--sep); }
+    }
+    :root { color-scheme: light; }
+    .btn { padding: 0 14px; font-size: 14.5px; }
+    .glass-cv { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: inherit; pointer-events: none; z-index: 0; }
+    #sidebar-shell.gl, #sidebar-shell.gl.refract { background: rgba(255,255,255,.04); -webkit-backdrop-filter: none; backdrop-filter: none; }
+    #sidebar-shell.gl::after { display: none; }
+    #sidebar-shell.gl .card, #sidebar-shell.gl .section { background: rgba(255,255,255,.26); }
+    .dpad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .dpad .btn { padding: 0; font-size: 18px; }
+    .hist-cell { cursor: pointer; font-size: 13px; }
+    .toast { position: fixed; bottom: 22px; left: 50%; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; z-index: 3000; max-width: 80vw; padding: 10px 18px; border-radius: 999px; background: var(--pop); box-shadow: var(--shadow); font-size: 13px; transition: transform .35s var(--spring), opacity .25s; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .wizard { position: fixed; inset: 0; z-index: 4000; display: grid; place-items: center; background: rgba(0,0,0,.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+    .wizard[hidden] { display: none; }
+    .wiz-card { width: min(420px, calc(100vw - 32px)); padding: 24px; border-radius: var(--r-panel); background: var(--pop); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
+    .wiz-card h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+    .wiz-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+    .wiz-steps li { display: flex; align-items: center; gap: 12px; font-size: 14px; }
+    .wiz-steps li span { flex: 1; }
+    .wiz-steps i { width: 22px; height: 22px; border-radius: 50%; flex: none; background: var(--well); transition: background .3s; }
+    .wiz-steps li.ok i { background: var(--green); }
+    .wiz-steps li.bad i { background: var(--red); }
+    .hdg { display: flex; gap: 8px; align-items: center; }
+    .hdg .arr { display: inline-block; transition: transform .3s var(--spring); }
+    .wiz-note { margin: 0; font-size: 12.5px; color: var(--label2); }
   </style>
 </head>
 <body>
-  <div id="map-wrap">
-    <div id="map"></div>
-  </div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <filter id="liquid" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.012" numOctaves="2" seed="4" result="n" />
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G" />
+    </filter>
+  </svg>
 
-  <button id="btn-toggle-bar" type="button" style="display: none;">GPS Simulador</button>
+  <div id="map-wrap"><div id="map"></div></div>
+
+  <button id="btn-toggle-bar" type="button" style="display: none;">Simulador GPS</button>
 
   <aside id="sidebar-shell">
-    <svg id="lg-svg" style="position: absolute; width: 304px; height: 600px; pointer-events: none;" aria-hidden="true">
-      <defs>
-        <filter id="lg-lens-filter" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
-          <feImage id="lg-feimage" x="0" y="0" width="100%" height="100%" result="DISP_MAP" preserveAspectRatio="xMidYMid slice" />
-          <feDisplacementMap in="SourceGraphic" in2="DISP_MAP" scale="28" xChannelSelector="R" yChannelSelector="G" result="REFRACTED" />
-        </filter>
-      </defs>
-    </svg>
+    <div id="sidebar-scroll">
+      <div class="header">
+        <span class="app-title">Simulador GPS</span>
+        <span><button id="btn-help" class="btn btn-plain" type="button">Ayuda</button><button id="btn-hide-bar" class="btn btn-plain" type="button">Ocultar</button></span>
+      </div>
 
-    <div class="lg-lens">
-      <span class="lg-optical-base"></span>
-      <span class="lg-edge-refraction" id="lg-refraction"></span>
-      <span class="lg-specular-glow" id="lg-specular-glow"></span>
-      <span class="lg-specular-rim" id="lg-specular-rim"></span>
+      <div class="search-wrap">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="5.5"/><path d="M13.5 13.5 17 17"/></svg>
+        <input id="search-input" type="text" placeholder="Dirección o lat, lon" autocomplete="off" />
+        <button id="btn-search" class="search-go" type="button" aria-label="Ir">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"/></svg>
+        </button>
+        <div id="suggest-list"></div>
+      </div>
 
-      <div class="lg-body">
-        <div id="sidebar-scroll">
-          <div class="header">
-            <span class="app-title">GPS Simulador</span>
-            <button id="btn-hide-bar" class="pill-close" type="button">Ocultar</button>
-          </div>
-
-          <div class="search-pill">
-            <input id="search-input" type="text" placeholder="Buscar lugar o coordenadas" autocomplete="off" />
-            <button id="btn-search" class="search-go" type="button">Ir</button>
-            <div id="suggest-list"></div>
-          </div>
-
-          <div class="glass-group">
-            <div class="group-inner">
-              <div class="status-line">
-                <div class="status-pill">
-                  <span id="status-dot" class="dot"></span>
-                  <span id="status-badge">Detenido</span>
-                </div>
-                <span id="coords" class="coords">25.686600, -100.316100</span>
-              </div>
-
-              <div class="row">
-                <button id="btn-start" class="btn-pill btn-primary grow" type="button">Iniciar</button>
-                <button id="btn-stop" class="btn-pill btn-tint-red grow" type="button">Detener</button>
-              </div>
-
-              <div class="segmented two">
-                <button id="btn-layer-map" class="seg-opt active" type="button">Mapa</button>
-                <button id="btn-layer-sat" class="seg-opt" type="button">Satelite</button>
-              </div>
-
-              <div id="err"></div>
-            </div>
-          </div>
-
-          <details class="section" open>
-            <summary>
-              <span>Ruta</span>
-              <span id="route-info" class="sec-sub">Carro · 0 pts</span>
-            </summary>
-            <div class="sec-body">
-              <div class="segmented">
-                <button id="btn-mode-walk" class="seg-opt" type="button">Caminata</button>
-                <button id="btn-mode-bike" class="seg-opt" type="button">Bici</button>
-                <button id="btn-mode-car" class="seg-opt active" type="button">Carro</button>
-              </div>
-
-              <div class="row">
-                <button id="btn-route-mode" class="btn-pill btn-tint-blue grow" type="button">Marcar puntos</button>
-                <button id="btn-route-undo" class="btn-pill" type="button">Deshacer</button>
-                <button id="btn-route-clear" class="btn-pill" type="button">Limpiar</button>
-              </div>
-
-              <div class="row">
-                <button id="btn-route-run" class="btn-pill btn-primary grow" type="button">Iniciar ruta</button>
-                <button id="btn-route-pause" class="btn-pill grow" type="button">Pausar</button>
-              </div>
-
-              <div class="field-row">
-                <span>Velocidad (km/h)</span>
-                <input id="route-speed" class="num-input" type="number" min="1" max="250" value="45" style="width: 66px; text-align: right;" />
-              </div>
-
-              <div class="check-row">
-                <label class="check"><input id="route-streets" type="checkbox" checked /> Calles</label>
-                <label class="check"><input id="route-jitter" type="checkbox" checked /> Variacion</label>
-                <label class="check"><input id="route-loop" type="checkbox" /> Bucle</label>
-              </div>
-
-              <div id="route-stats" class="caption">0 m · ~0 min · auto</div>
-            </div>
-          </details>
-
-          <details class="section">
-            <summary>
-              <span>Favoritos</span>
-              <span id="summary-favs" class="sec-sub">0</span>
-            </summary>
-            <div class="sec-body">
-              <div class="row">
-                <input id="fav-name" class="text-input grow" type="text" placeholder="Nombre del lugar" />
-                <button id="btn-fav-save" class="btn-pill btn-tint-blue" type="button">Guardar</button>
-              </div>
-              <div class="row">
-                <select id="fav-select" class="select-input grow">
-                  <option value="">Elegir favorito...</option>
-                </select>
-                <button id="btn-fav-go" class="btn-pill" type="button">Ir</button>
-                <button id="btn-fav-del" class="btn-pill btn-tint-red" type="button">Borrar</button>
-              </div>
-            </div>
-          </details>
-
-          <details class="section">
-            <summary>
-              <span>Controles</span>
-              <span id="summary-step" class="sec-sub">Normal</span>
-            </summary>
-            <div class="sec-body">
-              <div class="segmented">
-                <button id="btn-step-1" class="seg-opt" type="button">Lento</button>
-                <button id="btn-step-2" class="seg-opt active" type="button">Normal</button>
-                <button id="btn-step-3" class="seg-opt" type="button">Rapido</button>
-              </div>
-              <div class="row">
-                <button id="btn-center" class="btn-pill grow" type="button">Centrar</button>
-                <button id="btn-copy" class="btn-pill grow" type="button">Copiar</button>
-                <label class="check"><input id="follow-marker" type="checkbox" /> Seguir</label>
-              </div>
-              <div class="caption">WASD mover · 1/2/3 paso · Espacio pausa</div>
-            </div>
-          </details>
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Idioma</span>
+          <span class="sec-sub">ES / EN</span>
+        </div>
+        <div class="segmented">
+          <button id="lang-es" class="seg-opt active" type="button">Español</button>
+          <button id="lang-en" class="seg-opt" type="button">English</button>
         </div>
       </div>
+
+      <div class="card">
+        <div class="status-line">
+          <div class="status-pill"><span id="status-dot" class="dot"></span><span id="status-badge">Detenido</span></div>
+          <span id="coords" class="coords">25.686600, -100.316100</span>
+        </div>
+        <div id="hdg" class="caption hdg"></div>
+        <div class="row">
+          <button id="btn-start" class="btn btn-primary grow" type="button">Iniciar</button>
+          <button id="btn-stop" class="btn btn-stop grow" type="button">Detener</button>
+        </div>
+        <button id="btn-restore" class="btn btn-plain" type="button">Restaurar ubicación real</button>
+        <div class="segmented">
+          <button id="btn-layer-map" class="seg-opt active" type="button">Mapa</button>
+          <button id="btn-layer-sat" class="seg-opt" type="button">Satélite</button>
+        </div>
+        <div id="err"></div>
+      </div>
+
+      <details class="section" open>
+        <summary><span>Transporte y ruta</span><span id="route-info" class="sec-sub">Carro · 0 pts</span></summary>
+        <div class="sec-body">
+          <div class="segmented">
+            <button id="btn-mode-walk" class="seg-opt" type="button">Caminata</button>
+            <button id="btn-mode-bike" class="seg-opt" type="button">Bici</button>
+            <button id="btn-mode-car" class="seg-opt active" type="button">Carro</button>
+          </div>
+          <button id="btn-route-mode" class="btn" type="button">Marcar puntos</button>
+          <div class="row">
+            <button id="btn-route-undo" class="btn grow" type="button">Deshacer</button>
+            <button id="btn-route-clear" class="btn btn-stop grow" type="button">Limpiar</button>
+          </div>
+          <div class="row">
+            <button id="btn-route-run" class="btn btn-primary grow" type="button">Iniciar ruta</button>
+            <button id="btn-route-pause" class="btn grow" type="button">Pausar</button>
+          </div>
+          <div class="row">
+            <button id="btn-gpx-import" class="btn grow" type="button">Importar GPX</button>
+            <button id="btn-gpx-export" class="btn grow" type="button">Exportar GPX</button>
+            <input id="gpx-file" type="file" accept=".gpx" hidden />
+          </div>
+          <div class="list">
+            <div class="cell"><span>Velocidad</span><span id="speed-val" class="val">45 km/h</span></div>
+            <div class="cell slider"><input id="route-speed" type="range" min="1" max="120" step="1" value="45" aria-label="Velocidad en km/h" /></div>
+            <label class="cell"><span>Calles</span><span class="switch"><input id="route-streets" type="checkbox" role="switch" checked /><i></i></span></label>
+            <label class="cell"><span>Variación</span><span class="switch"><input id="route-jitter" type="checkbox" role="switch" checked /><i></i></span></label>
+            <label class="cell"><span>Bucle</span><span class="switch"><input id="route-loop" type="checkbox" role="switch" /><i></i></span></label>
+            <div class="cell"><span>Parada en cada punto</span><span id="dwell-val" class="val">0 s</span></div>
+            <div class="cell slider"><input id="route-dwell" type="range" min="0" max="300" step="5" value="0" aria-label="Parada en segundos" /></div>
+          </div>
+          <div id="route-stats" class="caption">0 m · ~0 min · auto</div>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary><span>Favoritos</span><span id="summary-favs" class="sec-sub">0</span></summary>
+        <div class="sec-body">
+          <input id="fav-folder" class="field" list="fav-folders" type="text" placeholder="Carpeta (opcional)" /><datalist id="fav-folders"></datalist>
+          <div class="row">
+            <input id="fav-name" class="field grow" type="text" placeholder="Nombre del lugar" />
+            <button id="btn-fav-save" class="btn btn-primary" type="button">Guardar</button>
+          </div>
+          <div class="row">
+            <select id="fav-select" class="field grow"><option value="">Elegir favorito…</option></select>
+            <button id="btn-fav-go" class="btn" type="button">Ir</button>
+            <button id="btn-fav-del" class="btn btn-stop" type="button">Borrar</button>
+          </div>
+          <div class="row"><button id="btn-fav-import" class="btn grow" type="button">Importar</button><button id="btn-fav-export" class="btn grow" type="button">Exportar</button><input id="fav-file" type="file" accept=".json" hidden /></div>
+        </div>
+      </details>
+
+      <details class="section" id="hist-sec">
+        <summary><span>Historial</span><span id="summary-hist" class="sec-sub">0</span></summary>
+        <div class="sec-body">
+          <button id="btn-undo-tp" class="btn" type="button">Volver a la ubicación anterior</button>
+          <div id="hist-list" class="list"></div>
+        </div>
+      </details>
+
+      <details class="section">
+        <summary><span>Controles y atajos</span><span id="summary-step" class="sec-sub">2 Normal</span></summary>
+        <div class="sec-body">
+          <div class="segmented">
+            <button id="btn-step-1" class="seg-opt" type="button">1 Lento</button>
+            <button id="btn-step-2" class="seg-opt active" type="button">2 Normal</button>
+            <button id="btn-step-3" class="seg-opt" type="button">3 Rápido</button>
+          </div>
+          <div class="row">
+            <button id="btn-center" class="btn grow" type="button">Centrar</button>
+            <button id="btn-copy" class="btn grow" type="button">Copiar</button>
+          </div>
+          <div class="list">
+            <label class="cell"><span>Seguir marcador</span><span class="switch"><input id="follow-marker" type="checkbox" role="switch" /><i></i></span></label>
+          </div>
+          <div class="dpad">
+            <button class="btn" data-k="w" type="button" aria-label="Norte">↑</button>
+            <button class="btn" data-k="s" type="button" aria-label="Sur">↓</button>
+            <button class="btn" data-k="a" type="button" aria-label="Oeste">←</button>
+            <button class="btn" data-k="d" type="button" aria-label="Este">→</button>
+          </div>
+          <div class="caption">WASD mover · 1/2/3 paso · Espacio pausa</div>
+          <div class="caption">Ctrl+Alt+P pausa · Ctrl+Alt+R restaurar · Ctrl+Alt+↑↓←→ mover (global)</div>
+        </div>
+      </details>
     </div>
   </aside>
 
+  <div id="toast" class="toast" role="status"></div>
+  <div id="wizard" class="wizard" hidden>
+    <div class="wiz-card">
+      <h2>Conecta tu iPhone</h2>
+      <ol class="wiz-steps">
+        <li id="w-admin"><i></i><span>Ejecuta la app como administrador</span><button id="btn-elevate" class="btn btn-plain" type="button" hidden>Reiniciar</button></li>
+        <li id="w-dev"><i></i><span>Conecta el iPhone por USB y toca <b>Confiar</b></span></li>
+        <li id="w-mode"><i></i><span>Activa el Modo de desarrollador en Ajustes → Privacidad y seguridad</span></li>
+      </ol>
+      <p class="wiz-note">Algunos juegos y apps prohíben alterar la ubicación y pueden suspender cuentas. Úsalo bajo tu responsabilidad.</p>
+      <button id="btn-wiz-ok" class="btn btn-primary" type="button">Entendido</button>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    function buildPeripheralLensMap(width, height) {
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(64, Math.round(width));
-      canvas.height = Math.max(64, Math.round(height));
-      const ctx = canvas.getContext("2d");
-      const img = ctx.createImageData(canvas.width, canvas.height);
-      const data = img.data;
-      const w = canvas.width;
-      const h = canvas.height;
-      const rimWidth = 22;
-
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const distLeft = x;
-          const distRight = w - 1 - x;
-          const distTop = y;
-          const distBottom = h - 1 - y;
-          const minEdge = Math.min(distLeft, distRight, distTop, distBottom);
-
-          let dx = 0;
-          let dy = 0;
-          if (minEdge < rimWidth) {
-            const t = 1 - minEdge / rimWidth;
-            const bend = t * t * (3 - 2 * t);
-            const nx = (x - w * 0.5) / (w * 0.5);
-            const ny = (y - h * 0.5) / (h * 0.5);
-            dx = -nx * bend;
-            dy = -ny * bend;
-          }
-
-          const idx = (y * w + x) * 4;
-          data[idx] = Math.round((dx * 0.5 + 0.5) * 255);
-          data[idx + 1] = Math.round((dy * 0.5 + 0.5) * 255);
-          data[idx + 2] = 128;
-          data[idx + 3] = 255;
-        }
-      }
-
-      ctx.putImageData(img, 0, 0);
-      return canvas.toDataURL();
-    }
-
-    function initLiquidGlassLens() {
-      const shell = document.getElementById("sidebar-shell");
-      const svg = document.getElementById("lg-svg");
-      const feImg = document.getElementById("lg-feimage");
-      const refraction = document.getElementById("lg-refraction");
-      const rim = document.getElementById("lg-specular-rim");
-      const glow = document.getElementById("lg-specular-glow");
-
-      if (navigator.userAgent.toLowerCase().includes("firefox")) {
-        refraction.style.display = "none";
-      }
-
-      function refreshLens() {
-        const rect = shell.getBoundingClientRect();
-        const w = Math.max(100, Math.round(rect.width));
-        const h = Math.max(100, Math.round(rect.height));
-        svg.style.width = `${w}px`;
-        svg.style.height = `${h}px`;
-        const url = buildPeripheralLensMap(w, h);
-        feImg.setAttribute("href", url);
-        feImg.setAttributeNS("http://www.w3.org/1999/xlink", "href", url);
-      }
-
-      document.addEventListener("mousemove", (e) => {
-        const rect = shell.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        const ox = Math.max(-1, Math.min(1, (e.clientX - cx) / 420));
-        const oy = Math.max(-1, Math.min(1, (e.clientY - cy) / 420));
-        const angle = 138 + ox * 26;
-
-        rim.style.background = `linear-gradient(${angle}deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.22) 34%, rgba(255,255,255,0.06) 68%, rgba(255,255,255,0.68) 100%)`;
-        glow.style.background = `radial-gradient(circle at ${50 + ox * 24}% ${35 + oy * 24}%, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0) 65%)`;
-      });
-
-      window.addEventListener("resize", refreshLens);
-      refreshLens();
-    }
-
     document.addEventListener("DOMContentLoaded", () => {
-      initLiquidGlassLens();
-
       let lat = 25.6866, lon = -100.3161;
       let addingWaypoints = false;
       let waypoints = [];
@@ -845,9 +491,9 @@ HTML_PAGE = """
       };
 
       const stepPresets = {
-        1: { value: 0.00008, label: "Lento" },
-        2: { value: 0.0002,  label: "Normal" },
-        3: { value: 0.0005,  label: "Rapido" }
+        1: { value: 0.00008, label: "1 Lento" },
+        2: { value: 0.0002,  label: "2 Normal" },
+        3: { value: 0.0005,  label: "3 Rápido" }
       };
 
       if (typeof L === "undefined") {
@@ -855,20 +501,21 @@ HTML_PAGE = """
         return;
       }
 
-      const osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19
+      const osmLayer = L.tileLayer("{{ tiles_map|safe }}", {
+        maxZoom: 19, crossOrigin: "anonymous"
       });
       const satLayer = L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19 }
+        "{{ tiles_sat|safe }}",
+        { maxZoom: 19, crossOrigin: "anonymous" }
       );
       const satLabelsLayer = L.tileLayer(
         "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19 }
+        { maxZoom: 19, crossOrigin: "anonymous" }
       );
 
       const map = L.map("map", { layers: [osmLayer], zoomControl: false }).setView([lat, lon], 15);
       L.control.zoom({ position: "topright" }).addTo(map);
+      window.__map = map;
       const marker = L.marker([lat, lon], { draggable: true }).addTo(map);
       setTimeout(() => map.invalidateSize(), 150);
 
@@ -912,6 +559,7 @@ HTML_PAGE = """
         document.getElementById("btn-mode-bike").classList.toggle("active", mode === "bike");
         document.getElementById("btn-mode-car").classList.toggle("active", mode === "car");
         document.getElementById("route-speed").value = String(preset.speed);
+        document.getElementById("route-speed").dispatchEvent(new Event("input"));
         updateModeSummary();
         redrawRoute();
       }
@@ -1133,6 +781,17 @@ HTML_PAGE = """
         }
       }
 
+      function stopIndexes(pts) {
+        const out = []; let from = 0;
+        waypoints.forEach((w, k) => {
+          if (k === 0) return;
+          let best = from, bd = Infinity;
+          for (let i = from; i < pts.length; i++) { const d = distMeters(w, pts[i]); if (d < bd) { bd = d; best = i; } }
+          out.push(best); from = best;
+        });
+        return out;
+      }
+      window.__api = { reloadFavorites: loadFavoritesFromServer, map, getPath: () => pathPoints, getWaypoints: () => waypoints, setWaypoints: pts => { waypoints = pts; redrawRoute(); }, setLatLon: (a, b) => applyLocation(a, b) };
       document.getElementById("route-streets").addEventListener("change", redrawRoute);
       document.getElementById("route-speed").addEventListener("input", () => updateRouteStats(pathPoints));
 
@@ -1172,12 +831,22 @@ HTML_PAGE = """
 
       function renderFavorites() {
         const sel = document.getElementById("fav-select");
-        sel.innerHTML = '<option value="">Elegir favorito...</option>';
+        sel.innerHTML = '<option value="">Elegir favorito…</option>';
+        const dl = document.getElementById("fav-folders"), groups = {};
+        dl.innerHTML = "";
         favorites.forEach((f, i) => {
+          let parent = sel;
+          if (f.folder) {
+            if (!groups[f.folder]) {
+              groups[f.folder] = sel.appendChild(Object.assign(document.createElement("optgroup"), { label: f.folder }));
+              dl.appendChild(Object.assign(document.createElement("option"), { value: f.folder }));
+            }
+            parent = groups[f.folder];
+          }
           const opt = document.createElement("option");
           opt.value = String(i);
           opt.textContent = f.name;
-          sel.appendChild(opt);
+          parent.appendChild(opt);
         });
         document.getElementById("summary-favs").textContent = String(favorites.length);
       }
@@ -1192,7 +861,7 @@ HTML_PAGE = """
       document.getElementById("search-input").addEventListener("input", (e) => {
         const q = e.target.value.trim();
         if (suggestTimer) clearTimeout(suggestTimer);
-        if (q.length < 2) {
+        if (q.length < 3) {
           hideSuggestions();
           return;
         }
@@ -1201,7 +870,7 @@ HTML_PAGE = """
             .then(r => r.json())
             .then(d => renderSuggestions(d.results || []))
             .catch(() => hideSuggestions());
-        }, 300);
+        }, 600);
       });
 
       document.getElementById("search-input").addEventListener("keydown", (e) => {
@@ -1211,7 +880,7 @@ HTML_PAGE = """
       });
 
       document.addEventListener("click", (e) => {
-        if (!e.target.closest(".search-pill")) {
+        if (!e.target.closest(".search-wrap")) {
           hideSuggestions();
         }
       });
@@ -1279,7 +948,7 @@ HTML_PAGE = """
         fetch("/favorites", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, lat, lon })
+          body: JSON.stringify({ name, lat, lon, folder: document.getElementById("fav-folder").value.trim() })
         }).then(r => r.json()).then(d => {
           favorites = d.favorites || [];
           renderFavorites();
@@ -1307,7 +976,6 @@ HTML_PAGE = """
         addingWaypoints = !addingWaypoints;
         const btn = document.getElementById("btn-route-mode");
         btn.classList.toggle("btn-primary", addingWaypoints);
-        btn.classList.toggle("btn-tint-blue", !addingWaypoints);
         btn.textContent = addingWaypoints ? "Marcando..." : "Marcar puntos";
       };
 
@@ -1324,7 +992,6 @@ HTML_PAGE = """
         routePaused = false;
         const btn = document.getElementById("btn-route-mode");
         btn.classList.remove("btn-primary");
-        btn.classList.add("btn-tint-blue");
         btn.textContent = "Marcar puntos";
         const pts = await buildPathFromWaypoints();
         const speedKmh = parseFloat(document.getElementById("route-speed").value) || 15;
@@ -1333,7 +1000,7 @@ HTML_PAGE = """
         fetch("/route/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ waypoints: pts, speed_kmh: speedKmh, loop, jitter })
+          body: JSON.stringify({ waypoints: pts, speed_kmh: speedKmh, loop, jitter, dwell: parseFloat(document.getElementById("route-dwell").value) || 0, stops: stopIndexes(pts) })
         }).catch(() => {});
       };
 
@@ -1406,6 +1073,331 @@ HTML_PAGE = """
       }, 500);
     });
   </script>
+  <script>
+    (() => {
+      const $ = s => document.querySelector(s);
+      const $$ = s => [...document.querySelectorAll(s)];
+      const shell = $("#sidebar-shell");
+
+      // Refracción SVG solo si el motor lo soporta y el usuario no pidió menos transparencia/movimiento
+      const calm = matchMedia("(prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce)").matches;
+      if (!calm && CSS.supports("backdrop-filter", "url(#liquid) blur(1px)")) shell.classList.add("refract");
+
+      // Reflejo de luz que sigue al puntero
+      shell.addEventListener("pointermove", e => {
+        const r = shell.getBoundingClientRect();
+        shell.style.setProperty("--mx", (e.clientX - r.left) + "px");
+        shell.style.setProperty("--my", (e.clientY - r.top) + "px");
+        mouse = [e.clientX - r.left, e.clientY - r.top]; glassDirty = true;
+      });
+      shell.addEventListener("pointerleave", () => { mouse = [-999, -999]; glassDirty = true; });
+
+      // Segmented controls con indicador deslizante
+      function place(seg) {
+        const a = seg.querySelector(".seg-opt.active");
+        const t = seg.querySelector(".thumb");
+        if (!a || !t || !a.offsetWidth) return;
+        const first = !t.style.width;
+        if (first) t.style.transition = "none";
+        t.style.width = a.offsetWidth + "px";
+        t.style.transform = `translateX(${a.offsetLeft}px)`;
+        if (first) { t.offsetWidth; t.style.transition = ""; }
+      }
+      $$(".segmented").forEach(seg => {
+        const t = document.createElement("span");
+        t.className = "thumb";
+        seg.prepend(t);
+        place(seg);
+        new MutationObserver(() => place(seg)).observe(seg, { subtree: true, attributes: true, attributeFilter: ["class"] });
+        new ResizeObserver(() => place(seg)).observe(seg);
+      });
+
+      // Slider de velocidad
+      const sp = $("#route-speed"), sv = $("#speed-val");
+      const syncSpeed = () => {
+        sv.textContent = sp.value + " km/h";
+        sp.style.setProperty("--p", ((sp.value - sp.min) / (sp.max - sp.min) * 100) + "%");
+      };
+      sp.addEventListener("input", syncSpeed);
+      syncSpeed();
+
+      // Soltar el foco tras usar el mouse para que WASD y 1/2/3 sigan funcionando
+      sp.addEventListener("pointerup", () => sp.blur());
+      $$(".switch input").forEach(i => i.addEventListener("click", e => { if (e.detail) i.blur(); }));
+
+      // ---------- Liquid Glass WebGL: refracta los tiles del mapa ----------
+      let mouse = [-999, -999], glassDirty = true, dead = false;
+      const VS = "attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}";
+      const FS = `precision highp float;
+uniform sampler2D tx;uniform vec2 res,mouse;uniform float R,W,px;
+float sdf(vec2 p){vec2 q=abs(p)-(res*.5-R);return length(max(q,0.))+min(max(q.x,q.y),0.)-R;}
+vec3 blur(vec2 c,float rad){vec3 s=vec3(0.);for(int i=0;i<10;i++){float a=float(i)*2.39996,r=sqrt((float(i)+.5)/10.)*rad;s+=texture2D(tx,(c+vec2(cos(a),sin(a))*r)/res).rgb;}return s/10.;}
+void main(){
+  vec2 f=vec2(gl_FragCoord.x,res.y-gl_FragCoord.y),p=f-res*.5;
+  float d=sdf(p),a=clamp(.5-d,0.,1.);
+  if(a<=0.){gl_FragColor=vec4(0.);return;}
+  vec2 n=normalize(vec2(sdf(p+vec2(1.,0.))-sdf(p-vec2(1.,0.)),sdf(p+vec2(0.,1.))-sdf(p-vec2(0.,1.)))+1e-5);
+  float t=clamp(1.+d/W,0.,1.);
+  vec2 o=-n*pow(t,2.2)*W*.9;
+  float r=7.*px;
+  vec3 c=vec3(blur(f+o*1.12,r).r,blur(f+o,r).g,blur(f+o*.88,r).b);
+  c=mix(vec3(dot(c,vec3(.299,.587,.114))),c,1.3);
+  c=mix(c,vec3(1.),.30);
+  float lit=max(dot(n,normalize(vec2(-.55,-.83))),0.);
+  float rim=1.-smoothstep(0.,2.5*px,-d);
+  c+=rim*(.25+.7*lit)+pow(t,3.)*.18*(.4+lit);
+  c+=.09*exp(-pow(length(f-mouse)/(170.*px),2.));
+  gl_FragColor=vec4(c*a,a);
+}`;
+
+      function startGlass(map) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const cv = document.createElement("canvas");
+        cv.className = "glass-cv";
+        shell.prepend(cv);
+        const bail = e => { dead = true; console.warn("Liquid Glass desactivado:", e); cv.remove(); shell.classList.remove("gl"); };
+        const gl = cv.getContext("webgl", { premultipliedAlpha: true, antialias: false });
+        if (!gl) return bail("sin WebGL");
+        let U;
+        try {
+          const mk = (ty, src) => {
+            const s = gl.createShader(ty); gl.shaderSource(s, src); gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(s);
+            return s;
+          };
+          const pr = gl.createProgram();
+          gl.attachShader(pr, mk(gl.VERTEX_SHADER, VS));
+          gl.attachShader(pr, mk(gl.FRAGMENT_SHADER, FS));
+          gl.linkProgram(pr); gl.useProgram(pr);
+          gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+          const loc = gl.getAttribLocation(pr, "a");
+          gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+          U = Object.fromEntries(["tx", "res", "mouse", "R", "W", "px"].map(n => [n, gl.getUniformLocation(pr, n)]));
+        } catch (e) { return bail(e); }
+        gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+        [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]
+          .forEach(([k, v]) => gl.texParameteri(gl.TEXTURE_2D, k, v));
+
+        const sc = document.createElement("canvas"), cx = sc.getContext("2d");
+        let until = 0, ok = false;
+        const mark = () => { glassDirty = true; };
+        map.on("move zoom viewreset load resize layeradd layerremove", mark);
+        map.on("zoomstart zoomanim movestart", () => { until = performance.now() + 700; });
+        map.getContainer().addEventListener("load", mark, true);
+        new ResizeObserver(mark).observe(shell);
+        addEventListener("resize", mark);
+
+        function render() {
+          const w = shell.clientWidth, h = shell.clientHeight;
+          if (!w || !h) return;
+          if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+            cv.width = sc.width = Math.round(w * dpr);
+            cv.height = sc.height = Math.round(h * dpr);
+            gl.viewport(0, 0, cv.width, cv.height);
+          }
+          const L = shell.offsetLeft, T = shell.offsetTop;
+          cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          cx.fillStyle = "#e5e5ea"; cx.fillRect(0, 0, w, h);
+          map.getContainer().querySelectorAll(".leaflet-tile").forEach(im => {
+            if (!im.complete || !im.naturalWidth) return;
+            const r = im.getBoundingClientRect();
+            if (r.right < L || r.left > L + w || r.bottom < T || r.top > T + h) return;
+            cx.drawImage(im, r.left - L, r.top - T, r.width + .5, r.height + .5);
+          });
+          try { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, sc); }
+          catch (e) { return bail(e); }
+          gl.uniform1i(U.tx, 0);
+          gl.uniform2f(U.res, cv.width, cv.height);
+          gl.uniform2f(U.mouse, mouse[0] * dpr, mouse[1] * dpr);
+          gl.uniform1f(U.R, 32 * dpr); gl.uniform1f(U.W, 26 * dpr); gl.uniform1f(U.px, dpr);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+          if (!ok) { ok = true; shell.classList.add("gl"); }
+        }
+        (function loop(now) {
+          if (dead) return;
+          requestAnimationFrame(loop);
+          if (shell.classList.contains("collapsed")) return;
+          if (glassDirty || now < until) { glassDirty = false; render(); }
+        })(0);
+      }
+      document.addEventListener("DOMContentLoaded", () => { if (window.__map) startGlass(window.__map); });
+    })();
+  </script>
+  <script>
+    (() => {
+      const $ = s => document.querySelector(s);
+      const api = () => window.__api;
+      const toast = m => { const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 3500); };
+      const post = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b || {}) }).then(r => r.json());
+
+      window.__ui = { toast, post };
+      // Asistente de conexión
+      const wiz = $("#wizard"), mark = (id, c) => { $(id).className = c; };
+      const refresh = () => fetch("/status").then(r => r.json()).then(d => {
+        mark("#w-admin", d.admin ? "ok" : "bad"); $("#btn-elevate").hidden = d.admin;
+        mark("#w-dev", d.device ? "ok" : "");
+        const dev = /DeveloperMode|InvalidService/.test(d.error || "");
+        mark("#w-mode", dev ? "bad" : (d.device && d.active ? "ok" : ""));
+      }).catch(() => {});
+      setInterval(() => { if (!wiz.hidden) refresh(); }, 1000);
+      const openWiz = () => { wiz.hidden = false; refresh(); };
+      $("#btn-help").onclick = openWiz;
+      $("#btn-wiz-ok").onclick = () => { wiz.hidden = true; try { localStorage.setItem("wiz_seen", "1"); } catch (_) {} };
+      $("#btn-elevate").onclick = () => post("/elevate").then(d => { if (!d.ok) toast("No se pudo pedir permisos de administrador"); });
+      try { if (!localStorage.getItem("wiz_seen")) openWiz(); } catch (_) { openWiz(); }
+      $("#btn-restore").onclick = () => { $("#btn-stop").click(); toast("Ubicación real restaurada"); };
+
+      // Historial
+      let hist = [];
+      const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? "ahora" : m < 60 ? `hace ${m} min` : `hace ${Math.round(m / 60)} h`; };
+      const loadHist = () => fetch("/history").then(r => r.json()).then(d => {
+        hist = d.items || [];
+        $("#summary-hist").textContent = hist.length;
+        const box = $("#hist-list"); box.innerHTML = "";
+        hist.slice(0, 8).forEach(h => {
+          const c = document.createElement("div");
+          c.className = "cell hist-cell";
+          c.innerHTML = `<span>${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}</span><span class="val">${ago(h.t)}</span>`;
+          c.onclick = () => api().setLatLon(h.lat, h.lon);
+          box.appendChild(c);
+        });
+      }).catch(() => {});
+      setInterval(() => { if ($("#hist-sec").open) loadHist(); }, 2500);
+      loadHist();
+      $("#btn-undo-tp").onclick = () => {
+        if (hist.length > 1) { api().setLatLon(hist[1].lat, hist[1].lon); toast("Volviste a la ubicación anterior"); }
+        else toast("Aún no hay una ubicación anterior");
+      };
+
+      // GPX
+      $("#btn-gpx-export").onclick = () => {
+        const a = api(), pts = a.getPath().length >= 2 ? a.getPath() : a.getWaypoints();
+        if (pts.length < 2) return toast("Marca al menos 2 puntos");
+        post("/gpx/save", { points: pts }).then(d => toast(d.ok ? "Guardado en " + d.path : "No se pudo guardar"));
+      };
+      $("#btn-gpx-import").onclick = () => $("#gpx-file").click();
+      $("#gpx-file").onchange = e => {
+        const f = e.target.files[0]; if (!f) return;
+        f.text().then(x => {
+          const doc = new DOMParser().parseFromString(x, "application/xml");
+          let pts = [...doc.querySelectorAll("trkpt,rtept,wpt")].map(n => ({ lat: +n.getAttribute("lat"), lon: +n.getAttribute("lon") })).filter(p => isFinite(p.lat) && isFinite(p.lon));
+          if (pts.length < 2) return toast("El GPX no tiene puntos válidos");
+          const k = Math.ceil(pts.length / 400);
+          if (k > 1) pts = pts.filter((_, i) => i % k === 0 || i === pts.length - 1);
+          $("#route-streets").checked = false;
+          api().setWaypoints(pts);
+          api().map.fitBounds(pts.map(p => [p.lat, p.lon]));
+          toast(`GPX importado: ${pts.length} puntos`);
+        });
+        e.target.value = "";
+      };
+
+      // Joystick en pantalla (mantener presionado repite)
+      document.querySelectorAll(".dpad .btn").forEach(b => {
+        let t;
+        const fire = () => document.dispatchEvent(new KeyboardEvent("keydown", { key: b.dataset.k }));
+        b.addEventListener("pointerdown", () => { fire(); t = setInterval(fire, 110); });
+        ["pointerup", "pointerleave", "pointercancel"].forEach(ev => b.addEventListener(ev, () => clearInterval(t)));
+      });
+    })();
+  </script>
+<script>
+    (() => {
+      const $ = s => document.querySelector(s);
+      const { toast, post } = window.__ui, api = () => window.__api;
+      let lang = "es";
+
+      // Parada en cada punto
+      const dw = $("#route-dwell"), dv = $("#dwell-val");
+      const syncDw = () => { dv.textContent = dw.value + " s"; dw.style.setProperty("--p", (dw.value / dw.max * 100) + "%"); };
+      dw.addEventListener("input", syncDw); syncDw();
+      dw.addEventListener("pointerup", () => dw.blur());
+
+      // Favoritos: exportar / importar
+      $("#btn-fav-export").onclick = () => post("/favorites/export").then(d => toast(d.ok ? "Guardado en " + d.path : "No se pudo guardar"));
+      $("#btn-fav-import").onclick = () => $("#fav-file").click();
+      $("#fav-file").onchange = e => {
+        const f = e.target.files[0]; if (!f) return;
+        f.text().then(x => post("/favorites/import", { favorites: JSON.parse(x) }))
+          .then(d => { api().reloadFavorites(); toast("Favoritos importados: " + d.added); })
+          .catch(() => toast("Archivo inválido"));
+        e.target.value = "";
+      };
+
+      // Comandos de atajos globales + rumbo
+      const CARD = { es: ["N", "NE", "E", "SE", "S", "SO", "O", "NO"], en: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] };
+      let lastHdg = "";
+      const drawHdg = d => {
+        const h = d.heading || 0;
+        const html = `<span class="arr" style="transform:rotate(${h}deg)">↑</span><span>${CARD[lang][Math.round(h / 45) % 8]} ${Math.round(h)}°</span>` + (d.dwell > 0 ? `<span class="val">${lang === "en" ? "Stop" : "Parada"} ${d.dwell} s</span>` : "");
+        if (html !== lastHdg) { lastHdg = html; $("#hdg").innerHTML = html; }
+      };
+      let lastCmd = {};
+      setInterval(() => fetch("/cmds").then(r => r.json()).then(d => {
+        lastCmd = d; drawHdg(d);
+        (d.cmds || []).forEach(c => {
+          if (c === "pause") $("#btn-route-pause").click();
+          else if (c === "restore") $("#btn-restore").click();
+          else document.dispatchEvent(new KeyboardEvent("keydown", { key: c }));
+        });
+      }).catch(() => {}), 300);
+
+      // ---------- Idioma ES / EN ----------
+      const EN = {"Idioma":"Language","Simulador GPS":"GPS Simulator","Ayuda":"Help","Ocultar":"Hide","Dirección o lat, lon":"Address or lat, lon","Ir":"Go","Detenido":"Stopped","Iniciar":"Start","Detener":"Stop","Restaurar ubicación real":"Restore real location","Mapa":"Map","Satélite":"Satellite","Transporte y ruta":"Transport & route","Caminata":"Walk","Bici":"Bike","Carro":"Car","Marcar puntos":"Add points","Marcando...":"Adding...","Deshacer":"Undo","Limpiar":"Clear","Iniciar ruta":"Start route","Pausar":"Pause","Reanudar":"Resume","Importar GPX":"Import GPX","Exportar GPX":"Export GPX","Velocidad":"Speed","Velocidad en km/h":"Speed in km/h","Calles":"Streets","Variación":"Variation","Bucle":"Loop","Parada en cada punto":"Stop at each point","Parada en segundos":"Stop time in seconds","Favoritos":"Favorites","Nombre del lugar":"Place name","Carpeta (opcional)":"Folder (optional)","Guardar":"Save","Elegir favorito…":"Choose favorite…","Borrar":"Delete","Importar":"Import","Exportar":"Export","Historial":"History","Volver a la ubicación anterior":"Back to previous location","Controles y atajos":"Controls & shortcuts","1 Lento":"1 Slow","3 Rápido":"3 Fast","Centrar":"Center","Copiar":"Copy","Seguir marcador":"Follow marker","WASD mover · 1/2/3 paso · Espacio pausa":"WASD move · 1/2/3 step · Space pause","Ctrl+Alt+P pausa · Ctrl+Alt+R restaurar · Ctrl+Alt+↑↓←→ mover (global)":"Ctrl+Alt+P pause · Ctrl+Alt+R restore · Ctrl+Alt+↑↓←→ move (global)","Norte":"North","Sur":"South","Oeste":"West","Este":"East","Conecta tu iPhone":"Connect your iPhone","Ejecuta la app como administrador":"Run the app as administrator","Reiniciar":"Restart","Conecta el iPhone por USB y toca":"Connect the iPhone by USB and tap","Confiar":"Trust","Activa el Modo de desarrollador en Ajustes → Privacidad y seguridad":"Turn on Developer Mode in Settings → Privacy & Security","Algunos juegos y apps prohíben alterar la ubicación y pueden suspender cuentas. Úsalo bajo tu responsabilidad.":"Some games and apps forbid altering your location and may suspend accounts. Use at your own risk.","Entendido":"Got it","Conectando...":"Connecting...","Deteniendo...":"Stopping...","GPS Activo en iPhone":"GPS active on iPhone","Buscando iPhone...":"Looking for iPhone...","Montando imagen de desarrollador...":"Mounting developer image...","Iniciando túnel...":"Starting tunnel...","Iniciando túnel interno...":"Starting internal tunnel...","iPhone no detectado. Revisa el cable USB y toca Confiar.":"iPhone not detected. Check the USB cable and tap Trust.","Ubicación real restaurada":"Real location restored","Volviste a la ubicación anterior":"Back at the previous location","Aún no hay una ubicación anterior":"No previous location yet","Marca al menos 2 puntos":"Add at least 2 points","El GPX no tiene puntos válidos":"The GPX has no valid points","No se pudo guardar":"Could not save","Archivo inválido":"Invalid file","No se pudo pedir permisos de administrador":"Could not request administrator rights","ahora":"now"};
+      const MODE = { auto: "car", recta: "straight", peatonal: "pedestrian", caminata: "walking", bici: "bike" };
+      const RX = [
+        [/^(Caminata|Bici|Carro) · ([0-9]+) pts$/, (_, m, n) => `${EN[m]} · ${n} pts`],
+        [/^(.*) · (auto|recta|peatonal|caminata|bici)$/, (_, a, m) => `${a} · ${MODE[m]}`],
+        [/^Guardado en (.*)$/, (_, p) => "Saved to " + p],
+        [/^GPX importado: ([0-9]+) puntos$/, (_, n) => `GPX imported: ${n} points`],
+        [/^Favoritos importados: ([0-9]+)$/, (_, n) => `Favorites imported: ${n}`],
+        [/^hace ([0-9]+) (min|h)$/, (_, n, u) => `${n} ${u} ago`],
+        [/^Error de túnel: (.*)$/, (_, e) => "Tunnel error: " + e]
+      ];
+      const tr = str => {
+        const t = str.trim(); if (!t) return str;
+        let o = EN[t];
+        if (o === undefined) for (const [re, f] of RX) { const m = t.match(re); if (m) { o = f(...m); break; } }
+        return o === undefined ? str : str.replace(t, () => o);
+      };
+      const orig = new WeakMap(), done = new WeakMap();
+      const apply = n => {
+        if (lang !== "en" || n.data === done.get(n)) return;
+        if (["SCRIPT", "STYLE"].includes(n.parentNode && n.parentNode.nodeName)) return;
+        const t = tr(n.data);
+        if (t !== n.data) { orig.set(n, n.data); done.set(n, t); n.data = t; }
+      };
+      const walk = fn => { const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) fn(n); };
+      new MutationObserver(ms => {
+        if (lang !== "en") return;
+        ms.forEach(m => {
+          if (m.type === "characterData") apply(m.target);
+          else m.addedNodes.forEach(x => { if (x.nodeType === 3) apply(x); else if (x.nodeType === 1) { const w = document.createTreeWalker(x, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) apply(n); } });
+        });
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+
+      function setLang(l) {
+        lang = l; lastHdg = "";
+        try { localStorage.setItem("lang", l); } catch (_) {}
+        document.documentElement.lang = l;
+        $("#lang-es").classList.toggle("active", l === "es");
+        $("#lang-en").classList.toggle("active", l === "en");
+        if (l === "en") walk(apply); else walk(n => { if (orig.has(n)) { n.data = orig.get(n); orig.delete(n); done.delete(n); } });
+        document.querySelectorAll("[placeholder],[aria-label]").forEach(el => ["placeholder", "aria-label"].forEach(a => {
+          if (!el.hasAttribute(a)) return;
+          el.__es = el.__es || {}; if (el.__es[a] === undefined) el.__es[a] = el.getAttribute(a);
+          el.setAttribute(a, l === "en" ? tr(el.__es[a]) : el.__es[a]);
+        }));
+        drawHdg(lastCmd);
+      }
+      $("#lang-es").onclick = () => setLang("es");
+      $("#lang-en").onclick = () => setLang("en");
+      let saved = null; try { saved = localStorage.getItem("lang"); } catch (_) {}
+      const first = saved || ((navigator.language || "es").startsWith("es") ? "es" : "en");
+      if (first === "en") setLang("en");
+    })();
+  </script>
 </body>
 </html>
 """
@@ -1441,7 +1433,7 @@ def route_worker():
     elapsed = 0.0
     while True:
         elapsed += tick
-        if state["route_running"] and state["running"]:
+        if state["route_running"] and state["running"] and time.time() >= state["dwell_until"]:
             pts = state["route_waypoints"]
             idx = state["route_seg_idx"]
             if len(pts) >= 2 and idx < len(pts) - 1:
@@ -1449,12 +1441,23 @@ def route_worker():
                 cur_lat = state["lat"]
                 cur_lon = state["lon"]
                 dist = distance_meters(cur_lat, cur_lon, target["lat"], target["lon"])
+                if dist > 0.5:
+                    state["heading"] = bearing(cur_lat, cur_lon, float(target["lat"]), float(target["lon"]))
                 factor = 1.0 + (0.14 * math.sin(elapsed * 0.9)) if state.get("route_jitter") else 1.0
-                speed_mps = max(0.5, ((float(state["route_speed_kmh"]) * factor) * 1000.0) / 3600.0)
+                target_v = max(0.5, ((float(state["route_speed_kmh"]) * factor) * 1000.0) / 3600.0)
+                v = state.get("cur_v", 0.0)
+                v = min(target_v, v + 2.5 * tick) if v < target_v else max(target_v, v - 4.0 * tick)
+                if idx == len(pts) - 2 and not state["route_loop"]:
+                    v = min(v, max(0.8, math.sqrt(2 * 3.0 * dist)))
+                state["cur_v"] = v
+                speed_mps = max(0.5, v)
                 step_m = speed_mps * tick
                 if dist <= step_m or dist < 1e-6:
                     state["lat"] = float(target["lat"])
                     state["lon"] = float(target["lon"])
+                    if state["route_dwell"] > 0 and (idx + 1) in state["route_stops"]:
+                        state["dwell_until"] = time.time() + state["route_dwell"]
+                        state["cur_v"] = 0.0
                     if idx + 1 < len(pts) - 1:
                         state["route_seg_idx"] = idx + 1
                     elif state["route_loop"]:
@@ -1556,7 +1559,7 @@ async def _close_obj(obj):
 async def _run_dvt_session(addr, port):
     dvt_cls, loc_cls, mounter_fn = _load_dvt_tools()
     if not dvt_cls or not loc_cls:
-        raise RuntimeError("No se encontro el modulo DVT en pymobiledevice3.")
+        raise RuntimeError("No se encontró el módulo DVT en pymobiledevice3.")
     rsd = await _open_obj(RemoteServiceDiscoveryService((addr, port)))
     dvt = None
     sim = None
@@ -1600,20 +1603,110 @@ def location_loop():
                     state["error"] = "iPhone no detectado. Revisa el cable USB y toca Confiar."
             except requests.exceptions.ConnectionError:
                 state["active"] = False
-                state["status_text"] = "Iniciando tunel..."
-                state["error"] = ("Error de tunel: " + state["tunnel_err"]) if state["tunnel_err"] else "Iniciando tunel interno..."
+                state["status_text"] = "Iniciando túnel..."
+                state["error"] = ("Error de túnel: " + state["tunnel_err"]) if state["tunnel_err"] else "Iniciando túnel interno..."
             except Exception as e:
                 state["active"] = False
                 state["status_text"] = "Error"
                 msg = str(e)
                 if "DeveloperMode" in msg or "InvalidService" in msg:
-                    msg += " (Activa Modo de desarrollador en iPhone > Configuracion > Privacidad y seguridad)"
+                    msg += " (Activa Modo de desarrollador en iPhone > Configuración > Privacidad y seguridad)"
                 state["error"] = msg
         time.sleep(1)
 
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+ROUTES_DIR = os.path.join(BASE_DIR, "rutas")
+HISTORY_FILE = os.path.join(BASE_DIR, "historial.json")
+
+def tile_urls():
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            key = (json.load(f).get("maptiler_key") or "").strip()
+    except Exception:
+        key = ""
+    if key:
+        return (f"https://api.maptiler.com/maps/streets-v2/256/{{z}}/{{x}}/{{y}}.png?key={key}",
+                f"https://api.maptiler.com/tiles/satellite-v2/{{z}}/{{x}}/{{y}}.jpg?key={key}")
+    return ("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}")
+
+def is_admin():
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return True
+
+ADMIN = is_admin()
+state["device"] = False
+try:
+    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+        state["history"] = json.load(f)[:20]
+except Exception:
+    state["history"] = []
+
+def push_history(lat, lon):
+    h = state["history"]
+    if h and distance_meters(h[0]["lat"], h[0]["lon"], lat, lon) < 25:
+        return
+    h.insert(0, {"lat": lat, "lon": lon, "t": int(time.time())})
+    del h[20:]
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(h, f)
+    except Exception:
+        pass
+
+def device_watch():
+    while True:
+        try:
+            addr, port = get_tunnel_rsd()
+            state["device"] = bool(addr and port)
+        except Exception:
+            state["device"] = False
+        time.sleep(2)
+
+_geo_cache = {}
+_geo_lock = threading.Lock()
+_geo_last = [0.0]
+
+def nominatim(q, limit):
+    key = (q.lower(), limit)
+    if key in _geo_cache:
+        return _geo_cache[key]
+    with _geo_lock:
+        wait = 1.1 - (time.time() - _geo_last[0])
+        if wait > 0:
+            time.sleep(wait)
+        resp = requests.get("https://nominatim.openstreetmap.org/search",
+                            params={"q": q, "format": "json", "limit": limit},
+                            headers={"User-Agent": "Simulador-GPS/1.1"}, timeout=6)
+        _geo_last[0] = time.time()
+    items = resp.json()
+    if len(_geo_cache) > 300:
+        _geo_cache.clear()
+    _geo_cache[key] = items
+    return items
+
+def parse_map_link(text):
+    url = text
+    host = re.sub(r"^https?://([^/]+).*", r"\1", text).lower()
+    if not any(h in host for h in ("google.", "goo.gl", "apple.com")):
+        return None
+    try:
+        url = requests.get(text, timeout=6, allow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}).url
+    except Exception:
+        pass
+    for pat in (r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)", r"@(-?\d+\.\d+),(-?\d+\.\d+)",
+                r"[?&](?:ll|q|center|sll|daddr|destination)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)"):
+        m = re.search(pat, url)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+    return None
+
 @app.route("/")
 def index():
-    return render_template_string(HTML_PAGE)
+    m, sat = tile_urls()
+    return render_template_string(HTML_PAGE, tiles_map=m, tiles_sat=sat)
 
 @app.route("/status")
 def status():
@@ -1625,6 +1718,8 @@ def status():
         "lon": state["lon"],
         "error": state["error"],
         "route_running": state["route_running"],
+        "device": state["device"],
+        "admin": ADMIN,
     })
 
 @app.route("/start", methods=["POST"])
@@ -1656,23 +1751,21 @@ def cleanup():
 def move():
     data = request.get_json(silent=True) or {}
     if "lat" in data and "lon" in data:
-        state["lat"] = float(data["lat"])
-        state["lon"] = float(data["lon"])
+        nl, ng = float(data["lat"]), float(data["lon"])
+        if distance_meters(state["lat"], state["lon"], nl, ng) > 1:
+            state["heading"] = bearing(state["lat"], state["lon"], nl, ng)
+        state["lat"], state["lon"] = nl, ng
+        if not state["route_running"]:
+            push_history(state["lat"], state["lon"])
     return jsonify({"ok": True})
 
 @app.route("/suggest")
 def suggest_places():
     q = (request.args.get("q") or "").strip()
-    if len(q) < 2:
+    if len(q) < 3:
         return jsonify({"results": []})
     try:
-        resp = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": q, "format": "json", "limit": 5},
-            headers={"User-Agent": "GPS-Simulador/1.0"},
-            timeout=5,
-        )
-        raw = resp.json()
+        raw = nominatim(q, 5)
         results = []
         for item in raw:
             results.append({
@@ -1690,6 +1783,10 @@ def search_place():
     q = (data.get("query") or "").strip()
     if not q:
         return jsonify({"ok": False})
+    ll = parse_map_link(q) if re.match(r"https?://", q) else None
+    if ll:
+        state["lat"], state["lon"] = ll
+        return jsonify({"ok": True, "lat": ll[0], "lon": ll[1]})
     if "," in q:
         parts = [p.strip() for p in q.split(",")]
         if len(parts) == 2:
@@ -1702,13 +1799,7 @@ def search_place():
             except ValueError:
                 pass
     try:
-        resp = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params={"q": q, "format": "json", "limit": 1},
-            headers={"User-Agent": "GPS-Simulador/1.0"},
-            timeout=6,
-        )
-        items = resp.json()
+        items = nominatim(q, 1)
         if items:
             rlat = float(items[0]["lat"])
             rlon = float(items[0]["lon"])
@@ -1727,7 +1818,7 @@ def favorites_endpoint():
         try:
             flat = float(data["lat"])
             flon = float(data["lon"])
-            state["favorites"].append({"name": name, "lat": flat, "lon": flon})
+            state["favorites"].append({"name": name, "lat": flat, "lon": flon, "folder": (data.get("folder") or "").strip()})
             save_favorites(state["favorites"])
         except Exception:
             pass
@@ -1750,10 +1841,14 @@ def route_start():
         state["route_speed_kmh"] = float(data.get("speed_kmh") or 15.0)
         state["route_loop"] = bool(data.get("loop"))
         state["route_jitter"] = bool(data.get("jitter", True))
+        state["route_stops"] = {int(i) for i in (data.get("stops") or [])}
+        state["route_dwell"] = float(data.get("dwell") or 0)
+        state["dwell_until"] = 0.0
         state["lat"] = float(pts[0]["lat"])
         state["lon"] = float(pts[0]["lon"])
         state["route_running"] = True
         state["running"] = True
+        state["cur_v"] = 0.0
     return jsonify({"ok": True})
 
 @app.route("/route/resume", methods=["POST"])
@@ -1765,6 +1860,7 @@ def route_resume():
         state["route_jitter"] = bool(data.get("jitter", state["route_jitter"]))
         state["route_running"] = True
         state["running"] = True
+        state["cur_v"] = 0.0
     return jsonify({"ok": True})
 
 @app.route("/route/pause", methods=["POST"])
@@ -1779,6 +1875,91 @@ def route_clear():
     state["route_seg_idx"] = 0
     return jsonify({"ok": True})
 
+def bearing(lat1, lon1, lat2, lon2):
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dl = math.radians(lon2 - lon1)
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+state.update({"cmds": [], "heading": 0.0, "route_stops": set(), "route_dwell": 0.0, "dwell_until": 0.0})
+
+def hotkeys():
+    # Atajos globales (Ctrl+Alt+...) con la API de Windows, sin dependencias extra
+    try:
+        import ctypes.wintypes as wt
+        u = ctypes.windll.user32
+        keys = {1: (0x50, "pause"), 2: (0x52, "restore"), 3: (0x26, "w"), 4: (0x28, "s"), 5: (0x25, "a"), 6: (0x27, "d")}
+        for i, (vk, _) in keys.items():
+            u.RegisterHotKey(None, i, 0x0003 | (0x4000 if i < 3 else 0), vk)
+        msg = wt.MSG()
+        while u.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+            if msg.message == 0x0312 and msg.wParam in keys:
+                state["cmds"].append(keys[msg.wParam][1])
+    except Exception:
+        pass
+
+@app.route("/cmds")
+def cmds():
+    c, state["cmds"] = state["cmds"], []
+    return jsonify({"cmds": c, "heading": state["heading"], "dwell": max(0, round(state["dwell_until"] - time.time()))})
+
+@app.route("/favorites/import", methods=["POST"])
+def favorites_import():
+    items = (request.get_json(silent=True) or {}).get("favorites") or []
+    seen = {(f["name"], f["lat"], f["lon"]) for f in state["favorites"]}
+    added = 0
+    for it in items:
+        try:
+            f = {"name": str(it["name"]).strip() or "Favorito", "lat": float(it["lat"]), "lon": float(it["lon"]),
+                 "folder": str(it.get("folder") or "").strip()}
+        except Exception:
+            continue
+        k = (f["name"], f["lat"], f["lon"])
+        if k not in seen:
+            seen.add(k)
+            state["favorites"].append(f)
+            added += 1
+    save_favorites(state["favorites"])
+    return jsonify({"favorites": state["favorites"], "added": added})
+
+@app.route("/favorites/export", methods=["POST"])
+def favorites_export():
+    os.makedirs(ROUTES_DIR, exist_ok=True)
+    path = os.path.join(ROUTES_DIR, time.strftime("favoritos_%Y%m%d_%H%M%S.json"))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state["favorites"], f, indent=2, ensure_ascii=False)
+    return jsonify({"ok": True, "path": path})
+
+@app.route("/history")
+def history_list():
+    return jsonify({"items": state["history"]})
+
+@app.route("/gpx/save", methods=["POST"])
+def gpx_save():
+    pts = (request.get_json(silent=True) or {}).get("points") or []
+    if len(pts) < 2:
+        return jsonify({"ok": False})
+    os.makedirs(ROUTES_DIR, exist_ok=True)
+    path = os.path.join(ROUTES_DIR, time.strftime("ruta_%Y%m%d_%H%M%S.gpx"))
+    body = "".join('<trkpt lat="%.6f" lon="%.6f"/>' % (float(p["lat"]), float(p["lon"])) for p in pts)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="Simulador GPS" '
+                'xmlns="http://www.topografix.com/GPX/1/1"><trk><name>Ruta</name><trkseg>' + body + "</trkseg></trk></gpx>")
+    return jsonify({"ok": True, "path": path})
+
+@app.route("/elevate", methods=["POST"])
+def elevate():
+    try:
+        args = "" if getattr(sys, "frozen", False) else '"%s"' % os.path.abspath(__file__)
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, args, None, 1)
+    except Exception:
+        return jsonify({"ok": False})
+    if rc <= 32:
+        return jsonify({"ok": False})
+    threading.Timer(0.5, lambda: os._exit(0)).start()
+    return jsonify({"ok": True})
+
 def run_flask():
     app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)
 
@@ -1787,10 +1968,12 @@ if __name__ == "__main__":
         threading.Thread(target=start_tunnel_daemon, daemon=True).start()
         threading.Thread(target=location_loop, daemon=True).start()
         threading.Thread(target=route_worker, daemon=True).start()
+        threading.Thread(target=device_watch, daemon=True).start()
+        threading.Thread(target=hotkeys, daemon=True).start()
         threading.Thread(target=run_flask, daemon=True).start()
         time.sleep(1.5)
         try:
-            win = webview.create_window("GPS Simulador", "http://127.0.0.1:5000", width=1180, height=760)
+            win = webview.create_window("Simulador GPS", "http://127.0.0.1:5000", width=1180, height=760)
             webview.start()
         except Exception:
             webbrowser.open("http://127.0.0.1:5000")
@@ -1799,7 +1982,8 @@ if __name__ == "__main__":
         finally:
             state["running"] = False
             state["route_running"] = False
+            time.sleep(2.0)  # da tiempo a restaurar la ubicación real del iPhone
             state["active"] = False
             state["status_text"] = "Detenido"
     except Exception as e:
-        ctypes.windll.user32.MessageBoxW(0, str(e), "Error GPS Simulador", 16)
+        ctypes.windll.user32.MessageBoxW(0, str(e), "Error Simulador GPS", 16)
