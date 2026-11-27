@@ -388,7 +388,7 @@
     if (open === !sidebar.classList.contains("collapsed")) return;
     // Measure where we are now (possibly mid-animation) and where the CSS state ends.
     const from = sidebar.getBoundingClientRect(), fromRadius = getComputedStyle(sidebar).borderRadius;
-    sidebar.getAnimations().forEach(a => a.cancel());
+    sidebar.getAnimations().forEach(a => a.cancel());   // cancelled .finished rejects: no refresh
     scroller.getAnimations().forEach(a => a.cancel());
     sidebar.classList.toggle("collapsed", !open);
     scroller.inert = !open;
@@ -401,15 +401,17 @@
     }
     if (reduceMotion.matches) return;
     const to = sidebar.getBoundingClientRect(), toRadius = getComputedStyle(sidebar).borderRadius;
-    sidebar.animate(
+    sidebar.classList.add("lg-morphing");   // pause the costly lens filter while the size changes
+    const anim = sidebar.animate(
       [{ width: from.width + "px", height: from.height + "px", borderRadius: fromRadius },
        { width: to.width + "px", height: to.height + "px", borderRadius: toRadius }],
       open ? { duration: 620, easing: "cubic-bezier(.3,1.25,.45,1)" }     // springy expand, slight overshoot
            : { duration: 440, easing: "cubic-bezier(.6,0,.3,1)" });       // quick, tight compress
-    // Content "materialises" out of the glass: it fades, scales and comes into focus.
+    anim.finished.then(() => { sidebar.classList.remove("lg-morphing"); sidebar.__lgRefresh?.(); }, () => {});
+    // Content emerges from the glass. Only opacity + transform: both run on the GPU compositor.
     scroller.animate(open
-      ? [{ opacity: 0, transform: "scale(.92)", filter: "blur(8px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }]
-      : [{ opacity: 1, transform: "none", filter: "blur(0)" }, { opacity: 0, transform: "scale(.92)", filter: "blur(6px)" }],
+      ? [{ opacity: 0, transform: "scale(.94)" }, { opacity: 1, transform: "none" }]
+      : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.94)" }],
       open ? { duration: 380, delay: 120, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" }
            : { duration: 200, easing: "ease-in" });
   }

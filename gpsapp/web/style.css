@@ -36,6 +36,9 @@ input, select { user-select: text; }
 .lg-svg { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .lg-refract { background: transparent !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 .lg-warp { z-index: -1; }
+/* During a size animation the lens filter is paused (it would be re-rasterised every frame);
+   the frosted blur stays, so the look barely changes while it moves. */
+.lg-morphing > .lg-warp { filter: none !important; }
 .lg-tint { z-index: -1; background: var(--lg-tint, rgba(255,255,255,.22)); }
 /* Specular rim, Apple style: a crisp 1 px line of light that is brightest at two OPPOSITE
    corners (light enters one side and exits the other); the angle follows the pointer. */

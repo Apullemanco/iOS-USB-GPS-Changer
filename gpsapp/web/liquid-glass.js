@@ -142,6 +142,9 @@
       node.classList.add("lg-refract");
       let timer;
       const resize = () => {
+        // While the element is being animated (class lg-morphing), skip the per-frame work:
+        // the caller runs node.__lgRefresh() once the animation ends.
+        if (node.classList.contains("lg-morphing")) return;
         const w = node.offsetWidth, h = node.offsetHeight;
         if (!w || !h) return;
         image.setAttribute("width", w);
@@ -152,6 +155,7 @@
         }
       };
       new ResizeObserver(resize).observe(node);
+      node.__lgRefresh = resize;
       resize();
     }
     layers.push(span("lg-edge lg-edge-1"), span("lg-edge lg-edge-2"));
