@@ -381,6 +381,12 @@
   // ---------- menu: the button expands into the panel / the panel compresses into the button ----------
   const sidebar = $("#sidebar"), pill = $("#menu-pill"), scroller = $("#sidebar-scroll");
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  const css = getComputedStyle(document.documentElement);
+  const SPRING = {   // physics-based spring curves defined in style.css
+    expand: css.getPropertyValue("--spring-expand").trim(),
+    compress: css.getPropertyValue("--spring-compress").trim(),
+    ui: css.getPropertyValue("--spring-ui").trim(),
+  };
   function updatePillWidth() {
     sidebar.style.setProperty("--pill-w", Math.ceil($("span", pill).offsetWidth + 36) + "px");
   }
@@ -394,26 +400,23 @@
     scroller.inert = !open;
     pill.tabIndex = open ? -1 : 0;
     pill.setAttribute("aria-expanded", String(open));
-    if (sidebar.__lg) {   // elastic "jelly" pull only while it is a small button, like the original
-      sidebar.__lg.elasticity = open ? 0 : 0.15;
-      sidebar.classList.toggle("lg-elastic", !open);
-      sidebar.style.removeProperty("translate"); sidebar.style.removeProperty("scale");
-    }
     if (reduceMotion.matches) return;
     const to = sidebar.getBoundingClientRect(), toRadius = getComputedStyle(sidebar).borderRadius;
-    sidebar.classList.add("lg-morphing");   // pause the costly lens filter while the size changes
-    const anim = sidebar.animate(
-      [{ width: from.width + "px", height: from.height + "px", borderRadius: fromRadius },
-       { width: to.width + "px", height: to.height + "px", borderRadius: toRadius }],
-      open ? { duration: 620, easing: "cubic-bezier(.3,1.25,.45,1)" }     // springy expand, slight overshoot
-           : { duration: 440, easing: "cubic-bezier(.6,0,.3,1)" });       // quick, tight compress
-    anim.finished.then(() => { sidebar.classList.remove("lg-morphing"); sidebar.__lgRefresh?.(); }, () => {});
-    // Content emerges from the glass. Only opacity + transform: both run on the GPU compositor.
-    scroller.animate(open
-      ? [{ opacity: 0, transform: "scale(.94)" }, { opacity: 1, transform: "none" }]
-      : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.94)" }],
-      open ? { duration: 380, delay: 120, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" }
-           : { duration: 200, easing: "ease-in" });
+    // The glass pauses its lens by itself while its size changes (see liquid-glass.js).
+    const size = [{ width: from.width + "px", height: from.height + "px", borderRadius: fromRadius },
+                  { width: to.width + "px", height: to.height + "px", borderRadius: toRadius }];
+    if (open) {
+      // Expand: the glass grows on a soft spring (1 % overshoot) and the content rises out of it.
+      sidebar.animate(size, { duration: 690, easing: SPRING.expand });
+      scroller.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, delay: 90, easing: "ease-out", fill: "backwards" });
+      scroller.animate([{ transform: "translateY(-6px) scale(.96)" }, { transform: "none" }],
+                       { duration: 690, delay: 30, easing: SPRING.expand, fill: "backwards" });
+    } else {
+      // Compress: the content dissolves first, then the glass shrinks into the button, no bounce.
+      scroller.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.97)" }],
+                       { duration: 160, easing: "ease-in" });
+      sidebar.animate(size, { duration: 560, delay: 50, easing: SPRING.compress, fill: "backwards" });
+    }
   }
   $("#btn-hide-bar").onclick = () => setMenu(false);
   pill.onclick = () => setMenu(true);
@@ -469,20 +472,57 @@
     return t("ago_d", { n: Math.round(m / 1440) });
   }
   function renderHistory() {
+    const cfg = S.histSettings || { history_enabled: true, history_max: 20 };
     $("#hist-count").textContent = S.history.length;
-    $("#hist-list").replaceChildren(...S.history.slice(0, 8).map(h => {
+    $("#hist-enabled").checked = cfg.history_enabled;
+    setSeg("histmax", cfg.history_max);
+    if (!S.history.length) {
+      const empty = document.createElement("div");
+      empty.className = "cell hist-empty";
+      empty.textContent = t(cfg.history_enabled ? "hist_empty" : "hist_paused");
+      $("#hist-list").replaceChildren(empty);
+      return;
+    }
+    $("#hist-list").replaceChildren(...S.history.map(h => {
       const row = document.createElement("div");
       row.className = "cell hist-cell";
-      const a = document.createElement("span"), b = document.createElement("span");
-      a.textContent = `${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}`;
-      b.className = "val"; b.textContent = ago(h.t);
-      row.append(a, b);
+      row.setAttribute("role", "listitem");
+      const coords = document.createElement("span"), when = document.createElement("span");
+      const del = document.createElement("button");
+      coords.className = "hist-coords"; coords.textContent = `${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}`;
+      when.className = "val"; when.textContent = ago(h.t);
+      del.className = "hist-del"; del.type = "button"; del.textContent = "×";
+      del.title = t("hist_delete_one"); del.setAttribute("aria-label", t("hist_delete_one"));
+      del.onclick = e => { e.stopPropagation(); deleteHistory(h.id, row); };
+      row.append(coords, when, del);
       row.onclick = () => moveTo(h.lat, h.lon, { zoom: true });
       return row;
     }));
   }
-  const loadHistory = () => quiet(api("history")).then(d => { if (d) { S.history = d.items || []; renderHistory(); } });
+  const setHistory = d => { if (d) { S.history = d.items || []; S.histSettings = d.settings; renderHistory(); } return d; };
+  const loadHistory = () => quiet(api("history")).then(setHistory);
   $("#hist-sec").addEventListener("toggle", e => { if (e.target.open) loadHistory(); });
+
+  function deleteHistory(id, row) {
+    const done = () => quiet(api("history/" + encodeURIComponent(id), undefined, "DELETE")).then(setHistory).then(() => toast(t("hist_deleted")));
+    if (reduceMotion.matches) return done();
+    row.classList.add("removing");              // collapse the row away, then update the list
+    row.addEventListener("animationend", done, { once: true });
+  }
+  // Clear all: the first click arms the button, a second click within 3 s confirms.
+  const clearBtn = $("#btn-hist-clear");
+  function disarmClear() { clearTimeout(clearBtn.armTimer); clearBtn.classList.remove("armed"); setText(clearBtn, t("hist_clear")); }
+  clearBtn.onclick = () => {
+    if (!clearBtn.classList.contains("armed")) {
+      clearBtn.classList.add("armed"); setText(clearBtn, t("hist_clear_confirm"));
+      clearBtn.armTimer = setTimeout(disarmClear, 3000);
+      return;
+    }
+    disarmClear();
+    quiet(api("history", undefined, "DELETE")).then(setHistory).then(() => toast(t("hist_cleared")));
+  };
+  $("#hist-enabled").addEventListener("change", e => quiet(api("settings", { history_enabled: e.target.checked })).then(setHistory));
+  segHandlers.histmax = v => quiet(api("settings", { history_max: +v })).then(setHistory);
   $("#btn-hist-back").onclick = () => {
     const prev = S.history.find(h => distM(h, S) > 25);
     if (prev) { moveTo(prev.lat, prev.lon, { zoom: true }); toast(t("hist_back_done")); }
@@ -581,9 +621,26 @@
   }
 
   // ---------- wizard ----------
-  const openWizard = () => { $("#wizard").hidden = false; renderWizard(); };
+  // The dialog grows out of the screen on the expand spring and shrinks away on the compress one.
+  // Only transform + background colour are animated: opacity on (or above) a glass surface
+  // would hide the map from its lens.
+  const wizard = $("#wizard"), wizCard = $(".wiz-card");
+  const openWizard = () => {
+    wizard.hidden = false; renderWizard();
+    if (reduceMotion.matches) return;
+    wizard.animate([{ backgroundColor: "rgba(0,0,0,0)" }, { backgroundColor: "rgba(0,0,0,.22)" }], { duration: 300, easing: "ease-out" });
+    wizCard.animate([{ transform: "translateY(16px) scale(.86)" }, { transform: "none" }], { duration: 690, easing: SPRING.expand });
+  };
+  const closeWizard = () => {
+    store.set("wizard_seen", "1");
+    if (reduceMotion.matches) { wizard.hidden = true; return; }
+    wizard.animate([{ backgroundColor: "rgba(0,0,0,.22)" }, { backgroundColor: "rgba(0,0,0,0)" }], { duration: 260, easing: "ease-in", fill: "forwards" });
+    wizCard.animate([{ transform: "none" }, { transform: "translateY(12px) scale(.6)", visibility: "hidden" }],
+                    { duration: 300, easing: SPRING.compress, fill: "forwards" })
+      .finished.then(() => { wizard.hidden = true; wizard.getAnimations().concat(wizCard.getAnimations()).forEach(a => a.cancel()); }, () => {});
+  };
   $("#btn-help").onclick = openWizard;
-  $("#btn-wiz-ok").onclick = () => { $("#wizard").hidden = true; store.set("wizard_seen", "1"); };
+  $("#btn-wiz-ok").onclick = closeWizard;
   $("#btn-err-action").onclick = () => quiet(api("elevate", {})).then(d => { if (!d?.ok) toast(t("elevate_failed")); });
 
   // ---------- liquid glass ----------
@@ -595,13 +652,13 @@
   //  - small controls use "clear" glass (almost no blur, strong lensing at the rim);
   //  - large panels use "regular" glass (a bit more blur) and the cards inside carry legibility;
   //  - no glass on glass: content inside the panel gets plain fills; only buttons get light & lift.
-  const REGULAR = { refract: true, mode: "shader", aberration: 1.5, saturation: 180, brightness: 1.06 };
-  const CLEAR = { ...REGULAR, blurPx: 3, brightness: 1.1 };
-  LG.attach(sidebar, { ...REGULAR, displacement: 70, blurPx: 10 });
-  LG.attach($(".leaflet-bar"), { ...CLEAR, displacement: 45 });
-  LG.attach($("#toast"), { ...CLEAR, displacement: 45 });
-  LG.attach($(".wiz-card"), { ...REGULAR, displacement: 60, blurPx: 14 });
-  LG.attachAll(".btn:not(.btn-plain)", { interactive: true, elasticity: 0.1 });
+  // "lens" mode: a clear centre and a curved, magnifying rim (see lensMap in liquid-glass.js).
+  const GLASS = { refract: true, mode: "lens", saturation: 175, brightness: 1.07, dispersion: 0.05 };
+  LG.attach(sidebar, { ...GLASS, blurPx: 5, bevel: 30, lensOffset: 24 });            // collapsed: the whole pill is a lens
+  LG.attach($(".leaflet-bar"), { ...GLASS, blurPx: 1.5, bevel: 20, lensOffset: 14 });  // capsule lens
+  LG.attach($("#toast"), { ...GLASS, blurPx: 2, bevel: 22, lensOffset: 14 });
+  LG.attach($(".wiz-card"), { ...GLASS, blurPx: 12, bevel: 34, lensOffset: 26 });
+  LG.attachAll(".btn:not(.btn-plain)", { interactive: true });
 
   // ---------- boot ----------
   setSeg("lang", lang);

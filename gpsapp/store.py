@@ -96,29 +96,83 @@ class Favorites:
         return added
 
 
-class History:
-    """Recently visited places (newest first), skipping points closer than MIN_GAP_M."""
+class Settings:
+    """User preferences kept in config.json (also holds the optional maptiler_key)."""
 
-    MAX_ITEMS = 20
-    MIN_GAP_M = 25.0
+    DEFAULTS = {"history_enabled": True, "history_max": 20}
+    HISTORY_SIZES = (10, 20, 50, 100)
 
     def __init__(self, path: Path):
         self._path = path
         self._lock = threading.Lock()
-        self._items = [h for h in read_json(path, []) if isinstance(h, dict) and "lat" in h and "lon" in h]
-        self._items = self._items[: self.MAX_ITEMS]
+
+    def all(self) -> dict:
+        data = read_json(self._path, {})
+        return {k: data.get(k, v) for k, v in self.DEFAULTS.items()}
+
+    def update(self, changes: Any) -> dict:
+        if not isinstance(changes, dict):
+            return self.all()
+        with self._lock:
+            data = read_json(self._path, {})
+            if "history_enabled" in changes:
+                data["history_enabled"] = bool(changes["history_enabled"])
+            if changes.get("history_max") in self.HISTORY_SIZES:
+                data["history_max"] = int(changes["history_max"])
+            write_json(self._path, data)
+        return self.all()
+
+
+class History:
+    """Recently visited places (newest first), skipping points closer than MIN_GAP_M.
+
+    Recording can be paused and the size limit changed from the UI (see Settings)."""
+
+    MIN_GAP_M = 25.0
+
+    def __init__(self, path: Path, settings: Settings):
+        self._path = path
+        self._settings = settings
+        self._lock = threading.Lock()
+        loaded = [h for h in read_json(path, []) if isinstance(h, dict) and "lat" in h and "lon" in h]
+        self._items = [{**h, "id": str(h.get("id") or uuid.uuid4().hex[:12]), "t": int(h.get("t") or 0)} for h in loaded]
+        self._items = self._items[: self._settings.all()["history_max"]]
+        if any("id" not in h for h in loaded):
+            self._save()  # give v1 entries stable ids so they can be deleted one by one
+
+    def _save(self) -> None:
+        try:
+            write_json(self._path, self._items)
+        except OSError:
+            pass
 
     def all(self) -> list[dict]:
         with self._lock:
             return list(self._items)
 
     def push(self, lat: float, lon: float) -> None:
+        cfg = self._settings.all()
+        if not cfg["history_enabled"]:
+            return
         with self._lock:
             if self._items and distance_m(self._items[0]["lat"], self._items[0]["lon"], lat, lon) < self.MIN_GAP_M:
                 return
-            self._items.insert(0, {"lat": lat, "lon": lon, "t": int(time.time())})
-            del self._items[self.MAX_ITEMS:]
-            try:
-                write_json(self._path, self._items)
-            except OSError:
-                pass
+            self._items.insert(0, {"id": uuid.uuid4().hex[:12], "lat": lat, "lon": lon, "t": int(time.time())})
+            del self._items[cfg["history_max"]:]
+            self._save()
+
+    def delete(self, entry_id: str) -> None:
+        with self._lock:
+            self._items = [h for h in self._items if h["id"] != entry_id]
+            self._save()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items = []
+            self._save()
+
+    def trim(self) -> None:
+        """Apply a smaller size limit right away."""
+        with self._lock:
+            del self._items[self._settings.all()["history_max"]:]
+            self._save()

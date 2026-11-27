@@ -27,6 +27,9 @@
     saturation: 140,       // %
     brightness: 1,         // backdrop brightness; Apple's light glass lifts what is behind it
     aberration: 2,         // chromatic aberration intensity
+    bevel: 24,             // lens mode: width of the curved rim in px (capped to half the size)
+    lensOffset: 18,        // lens mode: how far (px) the rim pulls the background inwards
+    dispersion: 0.05,      // lens mode: extra bend for green/blue -> subtle rainbow at the rim
     elasticity: 0,         // 0 = static; 0.15 = original default for buttons
     interactive: false,    // hover / press highlights + press scale
   };
@@ -48,8 +51,10 @@
     return [ix * scaled + 0.5, iy * scaled + 0.5];
   }
   const shaderCache = new Map();
+  const SHADER_MAX_PX = 128;   // the map is a smooth function of uv: compute it small, SVG stretches it
   function shaderMap(width, height) {
-    const w = Math.max(2, Math.round(width)), h = Math.max(2, Math.round(height)), key = w + "x" + h;
+    const k = Math.min(1, SHADER_MAX_PX / Math.max(width, height));
+    const w = Math.max(2, Math.round(width * k)), h = Math.max(2, Math.round(height * k)), key = w + "x" + h;
     if (shaderCache.has(key)) return shaderCache.get(key);
     const raw = new Float32Array(w * h * 2);
     let max = 0;
@@ -79,6 +84,70 @@
     if (shaderCache.size > 24) shaderCache.clear();
     shaderCache.set(key, url);
     return url;
+  }
+
+  // ---------- "lens" mode: physically-shaped bevel (closer to Apple's Liquid Glass) ----------
+  // The element is treated as a slab of glass whose edge is a rounded bevel (a quarter circle in
+  // profile). Light through the flat centre is not bent at all (perfectly clear); through the
+  // bevel it is bent inwards more and more towards the rim, so the background is magnified and
+  // squeezed at the edge, like looking through the rim of a thick lens.
+  // Encoding for feDisplacementMap: R/G = 0.5 + offset/2 (offset in -1..1 along x/y).
+  const lensCache = new Map();
+  const LENS_MAX_PX = 220;   // sampling resolution cap; the map is smooth and stretched by SVG
+  function lensMap(width, height, radius, bevel) {
+    const s = Math.min(1, LENS_MAX_PX / Math.max(width, height));
+    const mw = Math.max(2, Math.round(width * s)), mh = Math.max(2, Math.round(height * s));
+    const r = Math.min(radius, width / 2, height / 2), b = Math.max(1, Math.min(bevel, width / 2, height / 2));
+    const key = [mw, mh, Math.round(width), Math.round(height), Math.round(r), Math.round(b)].join(",");
+    if (lensCache.has(key)) return lensCache.get(key);
+    const canvas = document.createElement("canvas");
+    canvas.width = mw; canvas.height = mh;
+    const ctx = canvas.getContext("2d"), img = ctx.createImageData(mw, mh), d = img.data;
+    const hx = width / 2 - r, hy = height / 2 - r;
+    for (let y = 0, p = 0; y < mh; y++) {
+      const py = (y + 0.5) / mh * height - height / 2;
+      for (let x = 0; x < mw; x++, p += 4) {
+        const px = (x + 0.5) / mw * width - width / 2;
+        // signed distance to the rounded-rect edge (negative inside) and its outward normal
+        const qx = Math.abs(px) - hx, qy = Math.abs(py) - hy;
+        let nx, ny, dist;
+        if (qx > 0 && qy > 0) {
+          const l = Math.hypot(qx, qy) || 1;
+          dist = l - r; nx = (qx / l) * Math.sign(px); ny = (qy / l) * Math.sign(py);
+        } else if (qx > qy) { dist = qx - r; nx = Math.sign(px); ny = 0; }
+        else { dist = qy - r; nx = 0; ny = Math.sign(py); }
+        const inside = -dist;                       // distance from the edge, inwards
+        let m = 0;
+        if (inside < b) {
+          const t = Math.min(1, 1 - Math.max(0, inside) / b);   // 0 where the bevel starts, 1 at the rim
+          m = 1 - Math.sqrt(1 - t * t);             // slope of a circular bevel: gentle, then steep
+        }
+        d[p] = 128 - nx * m * 127;                  // sample INWARDS -> magnified edge
+        d[p + 1] = 128 - ny * m * 127;
+        d[p + 2] = 128;
+        d[p + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const url = canvas.toDataURL();
+    if (lensCache.size > 32) lensCache.clear();
+    lensCache.set(key, url);
+    return url;
+  }
+  // One displacement per colour channel with a slightly larger bend for G and B: a hint of
+  // dispersion that only shows at the rim (the centre has no displacement at all).
+  function buildLensFilter(id, o) {
+    const svg = el("svg", { width: "0", height: "0", "aria-hidden": "true", class: "lg-svg" });
+    const f = el("filter", { id, x: "0", y: "0", width: "100%", height: "100%", "color-interpolation-filters": "sRGB" }, el("defs", {}, svg));
+    const image = el("feImage", { x: "0", y: "0", width: "1", height: "1", result: "MAP", preserveAspectRatio: "none" }, f);
+    const disp = o.lensOffset * 2;   // feDisplacementMap offset = scale * (C - 0.5)
+    [["r", 1], ["g", 1 + o.dispersion], ["b", 1 + o.dispersion * 2]].forEach(([c, k]) => {
+      el("feDisplacementMap", { in: "SourceGraphic", in2: "MAP", scale: disp * k, xChannelSelector: "R", yChannelSelector: "G", result: c + "D" }, f);
+      el("feColorMatrix", { in: c + "D", type: "matrix", values: MATRIX[c], result: c + "C" }, f);
+    });
+    el("feBlend", { in: "gC", in2: "bC", mode: "screen", result: "GB" }, f);
+    el("feBlend", { in: "rC", in2: "GB", mode: "screen" }, f);
+    return { svg, image };
   }
 
   // ---------- SVG filter (port of GlassFilter) ----------
@@ -130,33 +199,57 @@
 
     if (refract) {
       const id = "lg-filter-" + (++uid);
-      const { svg, image } = buildFilter(id, o);
-      const warp = span("lg-warp");
+      const { svg, image } = o.mode === "lens" ? buildLensFilter(id, o) : buildFilter(id, o);
+      const backdrop = `blur(${o.blurPx ?? 4 + o.blur * 32}px) saturate(${o.saturation}%) brightness(${o.brightness})`;
+      // Two backdrop layers: a plain frosted base, and the lens (frosted + displacement filter)
+      // on top. The base is only shown while the element changes size, so the lens can fade
+      // out/in smoothly instead of popping, and the costly filter is never redrawn per frame.
+      const base = span("lg-warp-base"), warp = span("lg-warp");
       warp.style.filter = `url(#${id})`;
-      const blurPx = o.blurPx ?? 4 + o.blur * 32;
-      warp.style.backdropFilter = warp.style.webkitBackdropFilter =
-        `blur(${blurPx}px) saturate(${o.saturation}%) brightness(${o.brightness})`;
+      base.style.backdropFilter = base.style.webkitBackdropFilter = backdrop;
+      warp.style.backdropFilter = warp.style.webkitBackdropFilter = backdrop;
       // The tint must NOT be painted by the warp itself: the displacement filter would split
       // a semi-transparent tint into R/G/B and blend it back as gray (the original has no tint).
-      layers.push(svg, warp, span("lg-tint"));
+      layers.push(svg, base, warp, span("lg-tint"));
       node.classList.add("lg-refract");
-      let timer;
-      const resize = () => {
-        // While the element is being animated (class lg-morphing), skip the per-frame work:
-        // the caller runs node.__lgRefresh() once the animation ends.
-        if (node.classList.contains("lg-morphing")) return;
+
+      let settleTimer, fadeTimer, lastSize = "";
+      const applySize = () => {
         const w = node.offsetWidth, h = node.offsetHeight;
         if (!w || !h) return;
         image.setAttribute("width", w);
         image.setAttribute("height", h);
-        if (o.mode === "shader") {   // regenerating is costly: wait until resizing settles
-          clearTimeout(timer);
-          timer = setTimeout(() => image.setAttribute("href", shaderMap(node.offsetWidth, node.offsetHeight)), 120);
+        if (o.mode === "shader") {
+          image.setAttribute("preserveAspectRatio", "none");   // stretch the low-res map to the element
+          image.setAttribute("href", shaderMap(w, h));
+        } else if (o.mode === "lens") {
+          const radius = parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0;
+          image.setAttribute("href", lensMap(w, h, radius, o.bevel));
         }
       };
-      new ResizeObserver(resize).observe(node);
-      node.__lgRefresh = resize;
-      resize();
+      const settle = () => {
+        applySize();
+        node.classList.add("lg-settling");     // base stays visible under the fading-in lens
+        node.classList.remove("lg-morphing");
+        clearTimeout(fadeTimer);
+        fadeTimer = setTimeout(() => node.classList.remove("lg-settling"), 400);
+      };
+      new ResizeObserver(() => {
+        const size = node.offsetWidth + "x" + node.offsetHeight;
+        if (size === lastSize) return;
+        const first = !lastSize;
+        lastSize = size;
+        if (first) { applySize(); return; }
+        // Size is changing (menu morph, section opening, window resize...): pause the lens.
+        // Only touch the class list when the state really changes: classList.add/remove rewrite
+        // the attribute even when nothing changes, which restyles the whole panel every frame.
+        if (!node.classList.contains("lg-morphing")) {
+          node.classList.remove("lg-settling");
+          node.classList.add("lg-morphing");
+        }
+        clearTimeout(settleTimer);
+        settleTimer = setTimeout(settle, 140);
+      }).observe(node);
     }
     layers.push(span("lg-edge lg-edge-1"), span("lg-edge lg-edge-2"));
     if (o.interactive) layers.push(span("lg-hover lg-hover-1"), span("lg-hover lg-hover-2"), span("lg-hover lg-hover-3"));
