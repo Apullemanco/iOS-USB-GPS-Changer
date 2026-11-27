@@ -4,13 +4,21 @@
   --blue: #007aff; --green: #34c759; --red: #ff3b30; --orange: #ff9500;
   --green-t: #248a3d; --orange-t: #b25f00; --red-t: #c4271d;
   --label: rgba(0,0,0,.88); --label2: rgba(60,60,67,.62); --sep: rgba(60,60,67,.18);
-  --g-panel: rgba(255,255,255,.55); --g-card: rgba(255,255,255,.42); --g-ctrl: rgba(255,255,255,.62);
-  --well: rgba(120,120,128,.16); --thumb: rgba(255,255,255,.94); --pop: rgba(255,255,255,.96);
+  --g-panel: rgba(255,255,255,.55); --g-card: rgba(255,255,255,.36); --g-ctrl: rgba(255,255,255,.52);
+  --well: rgba(120,120,128,.14); --thumb: rgba(255,255,255,.96); --pop: rgba(255,255,255,.96);
   --blur: blur(26px) saturate(180%);
-  --r-panel: 32px; --r-card: 24px; --r-ctrl: 16px;
+  /* Apple concentric corners: inner radius = outer radius - padding (34 - 14 = 20, 20 - 14 = 6 -> capsules) */
+  --pad: 14px; --r-panel: 34px; --r-card: 20px; --r-ctrl: 14px;
   --spring: cubic-bezier(.34,1.56,.64,1); --ease: cubic-bezier(.25,.1,.25,1);
-  --shadow: 0 8px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.06);
-  --hl: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -1px 0 rgba(255,255,255,.1);
+  /* Real spring physics sampled into linear() easings (response / damping, as in SwiftUI):
+     expand 0.5 s / 0.82 (1 % overshoot, 690 ms), compress 0.38 s / 1.0 (no overshoot, 560 ms),
+     ui 0.42 s / 0.9 (560 ms) for sections, popups and small controls. */
+  --spring-expand: linear(0, 0.0152, 0.055, 0.1118, 0.1796, 0.2536, 0.33, 0.4059, 0.4793, 0.5488, 0.6132, 0.6722, 0.7253, 0.7726, 0.8141, 0.8503, 0.8814, 0.9079, 0.9301, 0.9486, 0.9638, 0.9761, 0.9859, 0.9935, 0.9994, 1.0037, 1.0069, 1.009, 1.0103, 1.0109, 1.0111, 1.0109, 1.0104, 1.0098, 1.009, 1.0082, 1.0074, 1.0065, 1.0057, 1.005, 1.0042, 1.0036, 1.003, 1.0025, 1.002, 1.0016, 1.0013, 1);
+  --spring-compress: linear(0, 0.0169, 0.0596, 0.1183, 0.1859, 0.2574, 0.3293, 0.3992, 0.4655, 0.5272, 0.5839, 0.6354, 0.6818, 0.7232, 0.76, 0.7924, 0.8209, 0.8459, 0.8676, 0.8865, 0.9029, 0.917, 0.9292, 0.9396, 0.9486, 0.9563, 0.9629, 0.9686, 0.9734, 0.9774, 0.9809, 0.9839, 0.9864, 0.9885, 0.9903, 0.9918, 0.9931, 0.9942, 0.9951, 0.9959, 0.9966, 0.9971, 0.9976, 0.998, 0.9983, 0.9986, 0.9988, 1);
+  --spring-ui: linear(0, 0.0142, 0.0512, 0.1037, 0.166, 0.2337, 0.3036, 0.3732, 0.4406, 0.5047, 0.5646, 0.6198, 0.6702, 0.7157, 0.7564, 0.7925, 0.8243, 0.8522, 0.8764, 0.8973, 0.9153, 0.9306, 0.9436, 0.9546, 0.9638, 0.9714, 0.9777, 0.9829, 0.9872, 0.9906, 0.9933, 0.9955, 0.9972, 0.9985, 0.9995, 1.0002, 1.0007, 1.0011, 1.0013, 1.0015, 1.0015, 1.0015, 1.0015, 1.0014, 1.0013, 1.0012, 1.0011, 1);
+  /* Apple glass shadows: wide and very soft, plus a tight contact shadow */
+  --shadow: 0 10px 40px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08);
+  --hl: inset 0 1px 0 rgba(255,255,255,.55);
 }
 
 * { box-sizing: border-box; }
@@ -33,57 +41,91 @@ input, select { user-select: text; }
 .lg-layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
 .lg-svg { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .lg-refract { background: transparent !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-.lg-warp { z-index: -1; }
+/* Lens layer + frosted base. While the size changes (lg-morphing) the lens fades out and is
+   hidden, so its filter is not redrawn every frame; when it settles it fades back in over the
+   base (lg-settling). The look barely changes during the motion and nothing pops. */
+.lg-warp-base { z-index: -1; visibility: hidden; }
+.lg-morphing > .lg-warp-base, .lg-settling > .lg-warp-base { visibility: visible; }
+.lg-warp { z-index: -1; opacity: 1; transition: opacity .35s ease-out; }
+.lg-morphing > .lg-warp { opacity: 0; visibility: hidden; transition: opacity .1s linear, visibility 0s .1s; }
 .lg-tint { z-index: -1; background: var(--lg-tint, rgba(255,255,255,.22)); }
-.lg-edge {
-  z-index: 3; padding: 1.5px;
+/* Specular rim, Apple style: a crisp 1 px line of light that is brightest at two OPPOSITE
+   corners (light enters one side and exits the other); the angle follows the pointer. */
+.lg-edge-1 {
+  z-index: 3; padding: 1px;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  box-shadow: 0 0 0 .5px rgba(255,255,255,.5) inset, 0 1px 3px rgba(255,255,255,.25) inset, 0 1px 4px rgba(0,0,0,.35);
+  background: linear-gradient(var(--lg-ang, 135deg),
+    rgba(255,255,255,.95) 0%, rgba(255,255,255,.28) 22%, rgba(255,255,255,.06) 45%,
+    rgba(255,255,255,.06) 55%, rgba(255,255,255,.28) 78%, rgba(255,255,255,.75) 100%);
 }
-/* Original: edge-1 "screen" at 20 %, edge-2 "overlay"; approximated with normal alpha. */
-.lg-edge-1 { opacity: .45;
-  background: linear-gradient(var(--lg-ang, 135deg), rgba(255,255,255,0) 0%, rgba(255,255,255,var(--lg-a1, .12)) var(--lg-p1, 33%), rgba(255,255,255,var(--lg-a2, .4)) var(--lg-p2, 66%), rgba(255,255,255,0) 100%); }
-.lg-edge-2 { opacity: .8;
-  background: linear-gradient(var(--lg-ang, 135deg), rgba(255,255,255,0) 0%, rgba(255,255,255,var(--lg-b1, .32)) var(--lg-p1, 33%), rgba(255,255,255,var(--lg-b2, .6)) var(--lg-p2, 66%), rgba(255,255,255,0) 100%); }
-.lg-hover { z-index: 3; opacity: 0; transition: opacity .2s ease-out; }
-.lg-hover-1 { background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 50%); }
-.lg-hover-2 { background: radial-gradient(circle at 50% 0%, #fff 0%, rgba(255,255,255,0) 80%); }
-.lg-hover-3 { background: radial-gradient(circle at 50% 0%, #fff 0%, rgba(255,255,255,0) 100%); }
-.lg-hovered > .lg-hover-1, .lg-active > .lg-hover-1 { opacity: .3; }
-.lg-active > .lg-hover-2 { opacity: .3; }
-.lg-hovered > .lg-hover-3 { opacity: .22; }
-.lg-active > .lg-hover-3 { opacity: .45; }
-.lg-elastic { transition: translate .2s ease-out, scale .2s ease-out; }
-.lg-interactive.lg-active { scale: .96 !important; }
+/* Inner light: the body of the glass glows softly from its edges inwards. */
+.lg-edge-2 {
+  z-index: 3;
+  box-shadow: inset 0 1px 1.5px rgba(255,255,255,.65), inset 0 -1px 1px rgba(255,255,255,.22),
+              inset 0 0 14px rgba(255,255,255,.22);
+}
+/* Thick glass (surfaces that refract): the bevel catches light along the top and falls into
+   shade along the bottom, plus a broad soft reflection across the upper surface. This is what
+   gives the slab its volume. */
+.lg-refract > .lg-edge-1 { padding: 1.5px; }
+.lg-refract > .lg-edge-2 {
+  background:
+    radial-gradient(130% 70% at 25% -10%, rgba(255,255,255,.26), rgba(255,255,255,0) 55%),
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0) 30%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255,255,255,.85),                 /* top bevel highlight */
+    inset 1px 0 0 rgba(255,255,255,.35), inset -1px 0 0 rgba(255,255,255,.25),
+    inset 0 -1px 0 rgba(255,255,255,.4),                   /* light exiting at the bottom rim */
+    inset 0 16px 24px -18px rgba(255,255,255,.85),          /* glow inside the upper bevel */
+    inset 0 -18px 26px -20px rgba(0,0,0,.22);               /* shade inside the lower bevel */
+}
+/* A hairline outline + layered shadow so the glass separates from light backgrounds. */
+.lg-refract { box-shadow: 0 0 0 .5px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.10), 0 14px 36px rgba(0,0,0,.16) !important; }
+/* Touch light: follows the pointer and flares on press (iOS 26 glass "illuminates" when touched). */
+.lg-hover { z-index: 3; opacity: 0; transition: opacity .25s ease-out; }
+.lg-hover-1 { background: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 0%), rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 60%); }
+.lg-hover-2 { background: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgba(255,255,255,.9) 0%, rgba(255,255,255,0) 70%); }
+.lg-hover-3 { background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0) 60%); }
+.lg-hovered > .lg-hover-1 { opacity: .55; }
+.lg-active > .lg-hover-1 { opacity: .8; }
+.lg-active > .lg-hover-2 { opacity: .45; }
+.lg-active > .lg-hover-3 { opacity: .6; }
+.lg-elastic { transition: translate .25s ease-out, scale .5s var(--spring-ui); }
+/* Apple's glass controls LIFT when pressed (grow + brighten) instead of sinking. */
+.lg-interactive.lg-active { scale: 1.05 !important; filter: brightness(1.06) saturate(1.1); }
 
 /* ---------- Panel: the menu button expands into it and compresses back ---------- */
 :root { --panel-w: 340px; }
 #sidebar {
-  --lg-tint: rgba(255,255,255,.40);
+  /* Barely tinted: you see the map through the glass; the cards inside carry the legibility. */
+  --lg-tint: linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,.06));
   position: fixed; top: 14px; left: 14px; width: var(--panel-w); max-height: calc(100vh - 28px); z-index: 1000;
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: var(--r-panel); background: var(--g-panel);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  box-shadow: var(--shadow);
 }
-#sidebar.collapsed { width: var(--pill-w, 150px); height: 42px; border-radius: 21px; cursor: pointer; }
-#sidebar-scroll { width: var(--panel-w); flex: 0 1 auto; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; scrollbar-width: none; transform-origin: 0 0; }
+#sidebar.collapsed { width: var(--pill-w, 150px); height: 44px; border-radius: 22px; cursor: pointer; }
+#sidebar-scroll { width: var(--panel-w); flex: 0 1 auto; overflow-y: auto; padding: var(--pad); display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; transform-origin: 0 0; }
 #sidebar-scroll::-webkit-scrollbar { display: none; }
 #sidebar.collapsed #sidebar-scroll { opacity: 0; pointer-events: none; }
 .menu-pill {
   position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; padding: 0 18px; border: 0; border-radius: inherit;
   background: none; font: 600 15px var(--font); color: var(--label); white-space: nowrap; cursor: pointer;
   opacity: 0; pointer-events: none;
+  transition: opacity .12s ease-out;            /* expanding: the label dissolves at once */
 }
 .menu-pill span { display: inline-block; }
-#sidebar.collapsed .menu-pill { opacity: 1; pointer-events: auto; }
+/* compressing: the label appears only once the panel content has faded and the glass has shrunk */
+#sidebar.collapsed .menu-pill { opacity: 1; pointer-events: auto; transition: opacity .25s ease-out .2s; }
 .menu-pill:focus-visible { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
 
 .header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 2px; }
 .app-title { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
-.card, .section { position: relative; border-radius: var(--r-card); background: var(--g-card); box-shadow: var(--hl); }
-.card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+/* Content inside the glass uses plain fills, not more glass (Apple: "avoid glass on glass"). */
+.card, .section { position: relative; border-radius: var(--r-card); background: var(--g-card); box-shadow: inset 0 1px 0 rgba(255,255,255,.65), inset 0 0 0 .5px rgba(255,255,255,.4); }
+.card { padding: var(--pad); display: flex; flex-direction: column; gap: 10px; }
 .caption { font-size: 12px; color: var(--label2); padding: 0 2px; }
 .caption:empty { display: none; }
 
@@ -95,7 +137,8 @@ input, select { user-select: text; }
   transition: translate .2s ease-out, scale .2s ease-out, filter .2s var(--ease), opacity .2s;
 }
 .btn:disabled { opacity: .45; cursor: default; }
-.btn-primary { color: #fff; background: linear-gradient(180deg, #3d9bff, var(--blue)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 4px 14px rgba(0,122,255,.32); }
+/* "Prominent glass": a tinted, slightly translucent capsule that lets the light through. */
+.btn-primary { color: #fff; background: linear-gradient(180deg, rgba(64,156,255,.96), rgba(0,122,255,.92)); box-shadow: 0 6px 18px rgba(0,122,255,.28), 0 1px 2px rgba(0,60,140,.2); }
 .btn-stop { color: var(--red); background: rgba(255,59,48,.14); }
 .btn-plain { background: transparent; box-shadow: none; padding: 0 10px; height: 32px; font-weight: 500; }
 .btn:focus-visible, .seg-opt:focus-visible, .search-go:focus-visible, .coords:focus-visible { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
@@ -117,7 +160,11 @@ input::placeholder { color: var(--label2); }
 #suggest-list {
   position: absolute; top: 54px; left: 0; right: 0; max-height: 240px; overflow-y: auto; z-index: 2000;
   background: var(--pop); border-radius: 20px; box-shadow: var(--shadow); color: var(--label);
+  transform-origin: 50% 0; animation: pop-down .45s var(--spring-ui);
 }
+/* Popups unfold from where they come from (plays every time they appear). */
+@keyframes pop-down { from { opacity: 0; transform: translateY(-6px) scale(.96, .9); } }
+.err-box:not([hidden]) { animation: pop-down .45s var(--spring-ui); transform-origin: 50% 0; }
 .suggest-item { padding: 10px 14px; font-size: 13px; cursor: pointer; line-height: 1.35; border-bottom: .5px solid var(--sep); }
 .suggest-item:last-child { border-bottom: 0; }
 .suggest-item:hover, .suggest-item.sel { background: rgba(0,122,255,.12); }
@@ -145,8 +192,14 @@ input::placeholder { color: var(--label2); }
 .segmented { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; height: 38px; border-radius: 999px; background: var(--well); }
 .thumb {
   position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 999px; background: var(--thumb); pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.9);
-  transition: transform .45s var(--spring), width .3s var(--ease);
+  box-shadow: 0 2px 8px rgba(0,0,0,.12), inset 0 1px 1px rgba(255,255,255,.95), inset 0 0 0 .5px rgba(0,0,0,.04);
+  transition: transform .56s var(--spring-ui), width .45s var(--spring-ui), background .25s, box-shadow .25s;
+}
+/* While it travels, the thumb turns into a clear glass lens that you can see through (iOS 26). */
+.segmented.moving .thumb {
+  background: rgba(255,255,255,.38);
+  box-shadow: 0 6px 18px rgba(0,0,0,.14), inset 0 0 0 1px rgba(255,255,255,.85), inset 0 1px 3px rgba(255,255,255,.9),
+              inset 0 -1px 2px rgba(255,255,255,.4);
 }
 .seg-opt { position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; cursor: pointer; font: 500 13.5px var(--font); color: var(--label); }
 .seg-opt.active { font-weight: 600; }
@@ -156,13 +209,17 @@ input::placeholder { color: var(--label2); }
 .section summary { list-style: none; display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 16px; font-weight: 600; cursor: pointer; }
 .section summary::-webkit-details-marker { display: none; }
 .section summary::after {
-  content: ""; width: 8px; height: 14px; background: var(--label2); transition: transform .4s var(--spring);
+  content: ""; width: 8px; height: 14px; background: var(--label2); transition: transform .56s var(--spring-ui);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 14'%3E%3Cpath d='M1.5 1.5 6.5 7l-5 5.5' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
           mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 14'%3E%3Cpath d='M1.5 1.5 6.5 7l-5 5.5' fill='none' stroke='black' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .section[open] summary::after { transform: rotate(90deg); }
-.section::details-content { height: 0; overflow: hidden; transition: height .4s var(--ease), content-visibility .4s allow-discrete; }
-.section[open]::details-content { height: auto; }
+/* Sections open/close on the same spring; the content fades so it never looks "cut". */
+.section::details-content {
+  height: 0; opacity: 0; overflow: hidden;
+  transition: height .56s var(--spring-ui), opacity .22s ease-in, content-visibility .56s allow-discrete;
+}
+.section[open]::details-content { height: auto; opacity: 1; transition: height .56s var(--spring-ui), opacity .4s ease-out .08s, content-visibility .56s allow-discrete; }
 .sec-sub { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--label2); }
 .sec-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
 
@@ -181,18 +238,28 @@ label.cell, .hist-cell { cursor: pointer; }
 .switch i { position: absolute; inset: 0; border-radius: 999px; background: rgba(120,120,128,.32); transition: background .3s var(--ease); }
 .switch i::after {
   content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 999px; background: #fff;
-  box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16); transition: transform .4s var(--spring), width .2s var(--ease);
+  box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+  transition: transform .56s var(--spring-ui), width .3s var(--spring-ui), background .2s, box-shadow .2s;
 }
 .switch input:checked + i { background: var(--green); }
 .switch input:checked + i::after { transform: translateX(20px); }
-.switch input:active + i::after { width: 34px; }
-.switch input:checked:active + i::after { transform: translateX(13px); }
+/* Pressed knob = enlarged clear glass lens over the track (iOS 26 toggle). */
+.switch input:active + i::after {
+  width: 34px; transform: scale(1.18); background: rgba(255,255,255,.4);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.9), inset 0 1px 3px #fff, 0 4px 12px rgba(0,0,0,.18);
+}
+.switch input:checked:active + i::after { transform: translateX(13px) scale(1.18); }
 .switch input:focus-visible + i { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
 
 input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; --p: 30%; }
 input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--blue) var(--p), rgba(120,120,128,.32) var(--p)); }
 input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--blue) var(--p), rgba(120,120,128,.32) var(--p)); }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); transition: transform .5s var(--spring-ui), background .2s, box-shadow .2s; }
+/* Dragging turns the knob into a magnifying glass lens over the track (iOS 26 slider). */
+input[type=range]:active::-webkit-slider-thumb {
+  transform: scale(1.4); background: rgba(255,255,255,.3);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.95), inset 0 1px 3px #fff, 0 6px 16px rgba(0,0,0,.18);
+}
 input[type=range]::-moz-range-thumb { width: 28px; height: 28px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 
 .field { height: 40px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--g-ctrl); box-shadow: var(--hl); font: 400 15px var(--font); color: var(--label); outline: 0; min-width: 0; }
@@ -209,7 +276,7 @@ select.field {
 
 /* ---------- Map ---------- */
 .leaflet-control-zoom { margin: 14px 14px 0 0 !important; }
-.leaflet-bar { --lg-tint: rgba(255,255,255,.45); border: 0 !important; border-radius: 20px !important; overflow: hidden; background: var(--g-panel) !important;
+.leaflet-bar { --lg-tint: rgba(255,255,255,.14); border: 0 !important; border-radius: 20px !important; overflow: hidden; background: var(--g-panel) !important;
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); box-shadow: 0 12px 40px rgba(0,0,0,.25) !important; }
 .leaflet-bar a { background: transparent !important; color: var(--label) !important; border-bottom: .5px solid var(--sep) !important; width: 40px !important; height: 40px !important; line-height: 40px !important; }
 .leaflet-bar a:last-child { border-bottom: 0 !important; }
@@ -219,10 +286,10 @@ select.field {
 /* ---------- Toast & wizard ---------- */
 /* No opacity animation on glass surfaces: in Chromium an element with opacity < 1 hides the
    backdrop from the glass inside it, so the toast animates with scale + visibility instead. */
-.toast { --lg-tint: rgba(255,255,255,.55); position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 40px) scale(.7); visibility: hidden; pointer-events: none; z-index: 3000; max-width: 80vw; padding: 10px 18px; border-radius: 999px; background: var(--pop); box-shadow: 0 12px 40px rgba(0,0,0,.25); font-size: 13px; font-weight: 500; transition: transform .45s var(--spring), visibility 0s .45s; }
-.toast.show { visibility: visible; transform: translate(-50%, 0) scale(1); transition: transform .45s var(--spring), visibility 0s; }
+.toast { --lg-tint: rgba(255,255,255,.42); position: fixed; bottom: 26px; left: 50%; transform: translate(-50%, 40px) scale(.7); visibility: hidden; pointer-events: none; z-index: 3000; max-width: 80vw; padding: 10px 18px; border-radius: 999px; background: var(--pop); box-shadow: 0 12px 40px rgba(0,0,0,.25); font-size: 13px; font-weight: 500; transition: transform .4s var(--spring-compress), visibility 0s .4s; }
+.toast.show { visibility: visible; transform: translate(-50%, 0) scale(1); transition: transform .69s var(--spring-expand), visibility 0s; }
 .wizard { position: fixed; inset: 0; z-index: 4000; display: grid; place-items: center; background: rgba(0,0,0,.22); }
-.wiz-card { --lg-tint: rgba(255,255,255,.62); width: min(440px, calc(100vw - 32px)); padding: 24px; border-radius: var(--r-panel); background: var(--pop); box-shadow: 0 16px 70px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 14px; }
+.wiz-card { --lg-tint: rgba(255,255,255,.5); width: min(440px, calc(100vw - 32px)); padding: 24px; border-radius: var(--r-panel); background: var(--pop); box-shadow: 0 16px 70px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 14px; }
 .wiz-card h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
 .wiz-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .wiz-steps li { display: flex; align-items: center; gap: 12px; font-size: 14px; line-height: 1.35; }
@@ -242,3 +309,22 @@ select.field {
   .card, .section, .search-wrap, .list { outline: 1px solid var(--sep); }
 }
 @media (max-width: 520px) { :root { --panel-w: calc(100vw - 28px); } }
+
+/* ---------- History management ---------- */
+#hist-list { max-height: 300px; overflow-y: auto; scrollbar-width: thin; }
+.hist-cell { gap: 8px; padding-right: 8px; }
+.hist-cell .hist-coords { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-del {
+  flex: none; width: 28px; height: 28px; border: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--well); color: var(--label2); font: 600 15px/1 var(--font); cursor: pointer;
+  transition: background .2s, color .2s, transform .45s var(--spring-ui);
+}
+.hist-del:hover { background: rgba(255,59,48,.16); color: var(--red); }
+.hist-del:active { transform: scale(.88); }
+.hist-del:focus-visible { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
+/* Removing one entry: it collapses away instead of vanishing. */
+.hist-cell.removing { animation: row-out .38s var(--spring-compress) forwards; overflow: hidden; }
+@keyframes row-out { to { opacity: 0; min-height: 0; height: 0; padding-block: 0; transform: translateX(24px); } }
+.hist-empty { padding: 14px; text-align: center; font-size: 13px; color: var(--label2); }
+/* Two-step "clear all": the first click arms it, the second one confirms. */
+#btn-hist-clear.armed { color: #fff; background: var(--red); box-shadow: 0 6px 18px rgba(255,59,48,.3); }

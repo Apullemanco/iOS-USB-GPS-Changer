@@ -10,11 +10,11 @@ import webbrowser
 
 from . import APP_NAME, __version__
 from .device import DeviceManager
-from .paths import DATA_DIR, FAVORITES_FILE, HISTORY_FILE, WEBVIEW_STORAGE, migrate_legacy_files
+from .paths import CONFIG_FILE, DATA_DIR, FAVORITES_FILE, HISTORY_FILE, WEBVIEW_STORAGE, migrate_legacy_files
 from .platform_utils import show_error, start_global_hotkeys
 from .server import create_app, default_save_path, free_port, serve
 from .simulator import Simulator
-from .store import Favorites, History
+from .store import Favorites, History, Settings
 
 log = logging.getLogger("gpsapp")
 _crash_file = None
@@ -56,7 +56,8 @@ def main() -> None:
     migrate_legacy_files()
     log.info("%s %s starting, data folder: %s", APP_NAME, __version__, DATA_DIR)
 
-    history = History(HISTORY_FILE)
+    settings = Settings(CONFIG_FILE)
+    history = History(HISTORY_FILE, settings)
     favorites = Favorites(FAVORITES_FILE)
     last = history.all()[0] if history.all() else {"lat": 25.6866, "lon": -100.3161}
     sim = Simulator(last["lat"], last["lon"], on_move=history.push)
@@ -84,7 +85,7 @@ def main() -> None:
         else:
             sim.nudge(action)
 
-    app, _token = create_app(sim, device, favorites, history, save_dialog, quit_app)
+    app, _token = create_app(sim, device, favorites, history, settings, save_dialog, quit_app)
     port = free_port()
     url = f"http://127.0.0.1:{port}/"
 

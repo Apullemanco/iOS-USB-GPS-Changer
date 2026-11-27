@@ -20,7 +20,7 @@ from .device import DeviceManager
 from .paths import CONFIG_FILE, EXPORT_DIR, WEB_DIR
 from .platform_utils import is_admin, relaunch_as_admin
 from .simulator import Route, Simulator
-from .store import Favorites, History, read_json
+from .store import Favorites, History, Settings, read_json
 
 SaveDialog = Callable[[str, str], Optional[str]]  # (default filename, file type label) -> path
 
@@ -60,7 +60,7 @@ def _num(data: dict, key: str, default: float | None = None) -> float | None:
 
 
 def create_app(sim: Simulator, device: DeviceManager, favorites: Favorites, history: History,
-               save_dialog: SaveDialog, quit_app: Callable[[], None]) -> tuple[Flask, str]:
+               settings: Settings, save_dialog: SaveDialog, quit_app: Callable[[], None]) -> tuple[Flask, str]:
     app = Flask(__name__, static_folder=None)
     token = secrets.token_urlsafe(24)
     started = time.time()
@@ -226,7 +226,23 @@ def create_app(sim: Simulator, device: DeviceManager, favorites: Favorites, hist
 
     @app.get("/api/history")
     def history_list():
-        return jsonify({"items": history.all()})
+        return jsonify({"items": history.all(), "settings": settings.all()})
+
+    @app.delete("/api/history/<entry_id>")
+    def history_delete(entry_id):
+        history.delete(entry_id)
+        return jsonify({"items": history.all(), "settings": settings.all()})
+
+    @app.delete("/api/history")
+    def history_clear():
+        history.clear()
+        return jsonify({"items": history.all(), "settings": settings.all()})
+
+    @app.post("/api/settings")
+    def settings_update():
+        new = settings.update(body())
+        history.trim()
+        return jsonify({"items": history.all(), "settings": new})
 
     @app.post("/api/gpx/export")
     def gpx_export():

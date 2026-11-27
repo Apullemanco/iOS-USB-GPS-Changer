@@ -119,7 +119,18 @@
         <summary><span data-i18n="sec_history"></span><span id="hist-count" class="sec-sub">0</span></summary>
         <div class="sec-body">
           <button id="btn-hist-back" class="btn" type="button" data-i18n="hist_back"></button>
-          <div id="hist-list" class="list"></div>
+          <div id="hist-list" class="list" role="list"></div>
+          <div class="list">
+            <label class="cell"><span data-i18n="hist_record"></span><span class="switch"><input id="hist-enabled" type="checkbox" role="switch" checked /><i></i></span></label>
+            <div class="cell"><span data-i18n="hist_keep"></span></div>
+          </div>
+          <div class="segmented" data-group="histmax">
+            <button class="seg-opt" data-value="10" type="button">10</button>
+            <button class="seg-opt active" data-value="20" type="button">20</button>
+            <button class="seg-opt" data-value="50" type="button">50</button>
+            <button class="seg-opt" data-value="100" type="button">100</button>
+          </div>
+          <button id="btn-hist-clear" class="btn btn-stop" type="button" data-i18n="hist_clear"></button>
         </div>
       </details>
 

@@ -13,11 +13,11 @@ Free and open-source desktop app to simulate the GPS location of an **iPhone or 
 - **Teleport**: click the map, drag the marker, search an address, paste `lat, lon`, or paste a Google Maps / Apple Maps / OpenStreetMap link.
 - **Move**: WASD or the arrow keys, an on-screen D-pad, and global hotkeys that work while the window is in the background.
 - **Routes**: real street routing for walking, cycling and driving, with realistic acceleration and braking, adjustable speed (changeable while the route plays), natural speed variation, loops, and a pause at each waypoint.
-- **GPX import/export**, **favorites** with folders (import/export), and **history**.
+- **GPX import/export**, **favorites** with folders (import/export), and **history** that you control: delete one place or everything, pause recording, and choose how many places to keep (10–100).
 - **No administrator rights needed on iOS 17.4+**: the app uses an in-process userspace tunnel.
 - A setup assistant that detects common problems: Apple driver missing, *Trust* not accepted, phone locked, Developer Mode off.
 - Pressing **Stop** or closing the app always gives the device back its real location.
-- **Liquid glass interface**: surfaces bend the map at their edges with chromatic aberration, highlights follow the mouse, and the menu button expands into the panel (and compresses back). On slow computers you can turn the effect off in *Controls & shortcuts*.
+- **Liquid glass interface**: clear glass with a curved, magnifying rim, beveled highlights that follow the mouse, and spring-physics animations; the menu button expands into the panel (and compresses back). On slow computers you can turn the effect off in *Controls & shortcuts*.
 
 ### Requirements
 
@@ -134,11 +134,11 @@ Aplicación de escritorio gratuita y de código abierto para simular la ubicaci�
 - **Teletransporte**: haz clic en el mapa, arrastra el marcador, busca una dirección, pega `lat, lon` o pega un enlace de Google Maps / Apple Maps / OpenStreetMap.
 - **Movimiento**: WASD o las flechas, un control direccional en pantalla y atajos globales que funcionan aunque la ventana esté en segundo plano.
 - **Rutas**: trazado real por calles para caminata, bici y auto, con aceleración y frenado realistas, velocidad ajustable (se puede cambiar durante la ruta), variación natural de velocidad, bucle y parada en cada punto.
-- **Importar/exportar GPX**, **favoritos** con carpetas (importar/exportar) e **historial**.
+- **Importar/exportar GPX**, **favoritos** con carpetas (importar/exportar) e **historial** bajo tu control: borra un lugar o todo, pausa el registro y elige cuántos lugares guardar (10–100).
 - **Sin permisos de administrador en iOS 17.4+**: la app usa un túnel propio en espacio de usuario.
 - Un asistente de conexión que detecta los problemas comunes: falta el controlador de Apple, no se aceptó *Confiar*, iPhone bloqueado, Modo de desarrollador desactivado.
 - Al pulsar **Detener** o cerrar la app, el dispositivo siempre recupera su ubicación real.
-- **Interfaz de vidrio líquido**: las superficies refractan el mapa en sus bordes con aberración cromática, los brillos siguen al mouse y el botón del menú se expande para convertirse en el panel (y se comprime de vuelta). En computadoras lentas puedes desactivar el efecto en *Controles y atajos*.
+- **Interfaz de vidrio líquido**: vidrio transparente con un borde curvo que magnifica, brillos biselados que siguen al mouse y animaciones con física de resorte; el botón del menú se expande para convertirse en el panel (y se comprime de vuelta). En computadoras lentas puedes desactivar el efecto en *Controles y atajos*.
 
 ### Requisitos
 
