@@ -4,13 +4,15 @@
   --blue: #007aff; --green: #34c759; --red: #ff3b30; --orange: #ff9500;
   --green-t: #248a3d; --orange-t: #b25f00; --red-t: #c4271d;
   --label: rgba(0,0,0,.88); --label2: rgba(60,60,67,.62); --sep: rgba(60,60,67,.18);
-  --g-panel: rgba(255,255,255,.55); --g-card: rgba(255,255,255,.42); --g-ctrl: rgba(255,255,255,.62);
-  --well: rgba(120,120,128,.16); --thumb: rgba(255,255,255,.94); --pop: rgba(255,255,255,.96);
+  --g-panel: rgba(255,255,255,.55); --g-card: rgba(255,255,255,.50); --g-ctrl: rgba(255,255,255,.66);
+  --well: rgba(120,120,128,.14); --thumb: rgba(255,255,255,.96); --pop: rgba(255,255,255,.96);
   --blur: blur(26px) saturate(180%);
-  --r-panel: 32px; --r-card: 24px; --r-ctrl: 16px;
+  /* Apple concentric corners: inner radius = outer radius - padding (34 - 14 = 20, 20 - 14 = 6 -> capsules) */
+  --pad: 14px; --r-panel: 34px; --r-card: 20px; --r-ctrl: 14px;
   --spring: cubic-bezier(.34,1.56,.64,1); --ease: cubic-bezier(.25,.1,.25,1);
-  --shadow: 0 8px 32px rgba(0,0,0,.14), 0 2px 6px rgba(0,0,0,.06);
-  --hl: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -1px 0 rgba(255,255,255,.1);
+  /* Apple glass shadows: wide and very soft, plus a tight contact shadow */
+  --shadow: 0 10px 40px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08);
+  --hl: inset 0 1px 0 rgba(255,255,255,.55);
 }
 
 * { box-sizing: border-box; }
@@ -35,40 +37,48 @@ input, select { user-select: text; }
 .lg-refract { background: transparent !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 .lg-warp { z-index: -1; }
 .lg-tint { z-index: -1; background: var(--lg-tint, rgba(255,255,255,.22)); }
-.lg-edge {
-  z-index: 3; padding: 1.5px;
+/* Specular rim, Apple style: a crisp 1 px line of light that is brightest at two OPPOSITE
+   corners (light enters one side and exits the other); the angle follows the pointer. */
+.lg-edge-1 {
+  z-index: 3; padding: 1px;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  box-shadow: 0 0 0 .5px rgba(255,255,255,.5) inset, 0 1px 3px rgba(255,255,255,.25) inset, 0 1px 4px rgba(0,0,0,.35);
+  background: linear-gradient(var(--lg-ang, 135deg),
+    rgba(255,255,255,.95) 0%, rgba(255,255,255,.28) 22%, rgba(255,255,255,.06) 45%,
+    rgba(255,255,255,.06) 55%, rgba(255,255,255,.28) 78%, rgba(255,255,255,.75) 100%);
 }
-/* Original: edge-1 "screen" at 20 %, edge-2 "overlay"; approximated with normal alpha. */
-.lg-edge-1 { opacity: .45;
-  background: linear-gradient(var(--lg-ang, 135deg), rgba(255,255,255,0) 0%, rgba(255,255,255,var(--lg-a1, .12)) var(--lg-p1, 33%), rgba(255,255,255,var(--lg-a2, .4)) var(--lg-p2, 66%), rgba(255,255,255,0) 100%); }
-.lg-edge-2 { opacity: .8;
-  background: linear-gradient(var(--lg-ang, 135deg), rgba(255,255,255,0) 0%, rgba(255,255,255,var(--lg-b1, .32)) var(--lg-p1, 33%), rgba(255,255,255,var(--lg-b2, .6)) var(--lg-p2, 66%), rgba(255,255,255,0) 100%); }
-.lg-hover { z-index: 3; opacity: 0; transition: opacity .2s ease-out; }
-.lg-hover-1 { background: radial-gradient(circle at 50% 0%, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 50%); }
-.lg-hover-2 { background: radial-gradient(circle at 50% 0%, #fff 0%, rgba(255,255,255,0) 80%); }
-.lg-hover-3 { background: radial-gradient(circle at 50% 0%, #fff 0%, rgba(255,255,255,0) 100%); }
-.lg-hovered > .lg-hover-1, .lg-active > .lg-hover-1 { opacity: .3; }
-.lg-active > .lg-hover-2 { opacity: .3; }
-.lg-hovered > .lg-hover-3 { opacity: .22; }
-.lg-active > .lg-hover-3 { opacity: .45; }
-.lg-elastic { transition: translate .2s ease-out, scale .2s ease-out; }
-.lg-interactive.lg-active { scale: .96 !important; }
+/* Inner light: the body of the glass glows softly from its edges inwards. */
+.lg-edge-2 {
+  z-index: 3;
+  box-shadow: inset 0 1px 1.5px rgba(255,255,255,.65), inset 0 -1px 1px rgba(255,255,255,.22),
+              inset 0 0 14px rgba(255,255,255,.22);
+}
+/* Touch light: follows the pointer and flares on press (iOS 26 glass "illuminates" when touched). */
+.lg-hover { z-index: 3; opacity: 0; transition: opacity .25s ease-out; }
+.lg-hover-1 { background: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 0%), rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 60%); }
+.lg-hover-2 { background: radial-gradient(circle at var(--lg-x, 50%) var(--lg-y, 50%), rgba(255,255,255,.9) 0%, rgba(255,255,255,0) 70%); }
+.lg-hover-3 { background: linear-gradient(180deg, rgba(255,255,255,.35), rgba(255,255,255,0) 60%); }
+.lg-hovered > .lg-hover-1 { opacity: .55; }
+.lg-active > .lg-hover-1 { opacity: .8; }
+.lg-active > .lg-hover-2 { opacity: .45; }
+.lg-active > .lg-hover-3 { opacity: .6; }
+.lg-elastic { transition: translate .25s ease-out, scale .35s var(--spring); }
+/* Apple's glass controls LIFT when pressed (grow + brighten) instead of sinking. */
+.lg-interactive.lg-active { scale: 1.05 !important; filter: brightness(1.06) saturate(1.1); }
 
 /* ---------- Panel: the menu button expands into it and compresses back ---------- */
 :root { --panel-w: 340px; }
 #sidebar {
-  --lg-tint: rgba(255,255,255,.40);
+  /* Light tint only: the glass stays clear; the cards inside carry the legibility (like Apple). */
+  --lg-tint: linear-gradient(180deg, rgba(255,255,255,.30), rgba(255,255,255,.16));
   position: fixed; top: 14px; left: 14px; width: var(--panel-w); max-height: calc(100vh - 28px); z-index: 1000;
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: var(--r-panel); background: var(--g-panel);
   -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
-  box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  box-shadow: var(--shadow);
 }
-#sidebar.collapsed { width: var(--pill-w, 150px); height: 42px; border-radius: 21px; cursor: pointer; }
-#sidebar-scroll { width: var(--panel-w); flex: 0 1 auto; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; scrollbar-width: none; transform-origin: 0 0; }
+#sidebar.collapsed { width: var(--pill-w, 150px); height: 44px; border-radius: 22px; cursor: pointer; }
+#sidebar-scroll { width: var(--panel-w); flex: 0 1 auto; overflow-y: auto; padding: var(--pad); display: flex; flex-direction: column; gap: 10px; scrollbar-width: none; transform-origin: 0 0; }
 #sidebar-scroll::-webkit-scrollbar { display: none; }
 #sidebar.collapsed #sidebar-scroll { opacity: 0; pointer-events: none; }
 .menu-pill {
@@ -82,8 +92,9 @@ input, select { user-select: text; }
 
 .header { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 2px; }
 .app-title { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
-.card, .section { position: relative; border-radius: var(--r-card); background: var(--g-card); box-shadow: var(--hl); }
-.card { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+/* Content inside the glass uses plain fills, not more glass (Apple: "avoid glass on glass"). */
+.card, .section { position: relative; border-radius: var(--r-card); background: var(--g-card); }
+.card { padding: var(--pad); display: flex; flex-direction: column; gap: 10px; }
 .caption { font-size: 12px; color: var(--label2); padding: 0 2px; }
 .caption:empty { display: none; }
 
@@ -95,7 +106,8 @@ input, select { user-select: text; }
   transition: translate .2s ease-out, scale .2s ease-out, filter .2s var(--ease), opacity .2s;
 }
 .btn:disabled { opacity: .45; cursor: default; }
-.btn-primary { color: #fff; background: linear-gradient(180deg, #3d9bff, var(--blue)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 4px 14px rgba(0,122,255,.32); }
+/* "Prominent glass": a tinted, slightly translucent capsule that lets the light through. */
+.btn-primary { color: #fff; background: linear-gradient(180deg, rgba(64,156,255,.96), rgba(0,122,255,.92)); box-shadow: 0 6px 18px rgba(0,122,255,.28), 0 1px 2px rgba(0,60,140,.2); }
 .btn-stop { color: var(--red); background: rgba(255,59,48,.14); }
 .btn-plain { background: transparent; box-shadow: none; padding: 0 10px; height: 32px; font-weight: 500; }
 .btn:focus-visible, .seg-opt:focus-visible, .search-go:focus-visible, .coords:focus-visible { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
@@ -145,8 +157,14 @@ input::placeholder { color: var(--label2); }
 .segmented { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 3px; height: 38px; border-radius: 999px; background: var(--well); }
 .thumb {
   position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 999px; background: var(--thumb); pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.9);
-  transition: transform .45s var(--spring), width .3s var(--ease);
+  box-shadow: 0 2px 8px rgba(0,0,0,.12), inset 0 1px 1px rgba(255,255,255,.95), inset 0 0 0 .5px rgba(0,0,0,.04);
+  transition: transform .5s var(--spring), width .35s var(--ease), background .25s, box-shadow .25s;
+}
+/* While it travels, the thumb turns into a clear glass lens that you can see through (iOS 26). */
+.segmented.moving .thumb {
+  background: rgba(255,255,255,.38);
+  box-shadow: 0 6px 18px rgba(0,0,0,.14), inset 0 0 0 1px rgba(255,255,255,.85), inset 0 1px 3px rgba(255,255,255,.9),
+              inset 0 -1px 2px rgba(255,255,255,.4);
 }
 .seg-opt { position: relative; z-index: 1; border: 0; background: transparent; border-radius: 999px; cursor: pointer; font: 500 13.5px var(--font); color: var(--label); }
 .seg-opt.active { font-weight: 600; }
@@ -181,18 +199,28 @@ label.cell, .hist-cell { cursor: pointer; }
 .switch i { position: absolute; inset: 0; border-radius: 999px; background: rgba(120,120,128,.32); transition: background .3s var(--ease); }
 .switch i::after {
   content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 999px; background: #fff;
-  box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16); transition: transform .4s var(--spring), width .2s var(--ease);
+  box-shadow: 0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16);
+  transition: transform .45s var(--spring), width .25s var(--ease), background .2s, box-shadow .2s;
 }
 .switch input:checked + i { background: var(--green); }
 .switch input:checked + i::after { transform: translateX(20px); }
-.switch input:active + i::after { width: 34px; }
-.switch input:checked:active + i::after { transform: translateX(13px); }
+/* Pressed knob = enlarged clear glass lens over the track (iOS 26 toggle). */
+.switch input:active + i::after {
+  width: 34px; transform: scale(1.18); background: rgba(255,255,255,.4);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.9), inset 0 1px 3px #fff, 0 4px 12px rgba(0,0,0,.18);
+}
+.switch input:checked:active + i::after { transform: translateX(13px) scale(1.18); }
 .switch input:focus-visible + i { outline: 3px solid rgba(0,122,255,.45); outline-offset: 2px; }
 
 input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; --p: 30%; }
 input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--blue) var(--p), rgba(120,120,128,.32) var(--p)); }
 input[type=range]::-moz-range-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--blue) var(--p), rgba(120,120,128,.32) var(--p)); }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -12px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); transition: transform .4s var(--spring), background .2s, box-shadow .2s; }
+/* Dragging turns the knob into a magnifying glass lens over the track (iOS 26 slider). */
+input[type=range]:active::-webkit-slider-thumb {
+  transform: scale(1.4); background: rgba(255,255,255,.3);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.95), inset 0 1px 3px #fff, 0 6px 16px rgba(0,0,0,.18);
+}
 input[type=range]::-moz-range-thumb { width: 28px; height: 28px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
 
 .field { height: 40px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--g-ctrl); box-shadow: var(--hl); font: 400 15px var(--font); color: var(--label); outline: 0; min-width: 0; }

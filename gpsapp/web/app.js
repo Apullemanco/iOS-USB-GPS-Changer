@@ -135,8 +135,17 @@
   const segHandlers = {};
   function setSeg(group, value) {
     const seg = $(`.segmented[data-group="${group}"]`);
+    const before = $(".seg-opt.active", seg);
     $$(".seg-opt", seg).forEach(b => b.classList.toggle("active", b.dataset.value === String(value)));
     placeThumb(seg);
+    const thumb = $(".thumb", seg);
+    if (!thumb || before === $(".seg-opt.active", seg) || reduceMotion.matches) return;
+    // Liquid move: the thumb becomes a clear lens and stretches like a drop while it travels.
+    seg.classList.add("moving");
+    clearTimeout(seg.movingTimer);
+    seg.movingTimer = setTimeout(() => seg.classList.remove("moving"), 380);
+    thumb.animate([{ scale: "1 1" }, { scale: "1.16 0.86", offset: 0.35 }, { scale: "0.97 1.04", offset: 0.75 }, { scale: "1 1" }],
+                  { duration: 520, easing: "ease-out" });
   }
   $$(".segmented").forEach(seg => {
     const thumb = document.createElement("span");
@@ -397,9 +406,10 @@
        { width: to.width + "px", height: to.height + "px", borderRadius: toRadius }],
       open ? { duration: 620, easing: "cubic-bezier(.3,1.25,.45,1)" }     // springy expand, slight overshoot
            : { duration: 440, easing: "cubic-bezier(.6,0,.3,1)" });       // quick, tight compress
+    // Content "materialises" out of the glass: it fades, scales and comes into focus.
     scroller.animate(open
-      ? [{ opacity: 0, transform: "scale(.92)" }, { opacity: 1, transform: "none" }]
-      : [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "scale(.92)" }],
+      ? [{ opacity: 0, transform: "scale(.92)", filter: "blur(8px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }]
+      : [{ opacity: 1, transform: "none", filter: "blur(0)" }, { opacity: 0, transform: "scale(.92)", filter: "blur(6px)" }],
       open ? { duration: 380, delay: 120, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" }
            : { duration: 200, easing: "ease-in" });
   }
@@ -578,14 +588,18 @@
   LG.disabled = store.get("glass_off") === "1";
   $("#glass-effect").checked = !LG.disabled;
   $("#glass-effect").addEventListener("change", e => { store.set("glass_off", e.target.checked ? "0" : "1"); location.reload(); });
-  // Full refraction only on surfaces that float over the map; inner controls get the
-  // specular edges + hover/press highlights (refracting glass-on-glass costs GPU for no gain).
-  LG.attach(sidebar, { refract: true, mode: "shader", displacement: 60, blur: 0.4, saturation: 165 });
-  LG.attach($(".leaflet-bar"), { refract: true, displacement: 40, blur: 0.3, saturation: 165 });
-  LG.attach($("#toast"), { refract: true, displacement: 50, blur: 0.3, saturation: 165 });
-  LG.attach($(".wiz-card"), { refract: true, mode: "shader", displacement: 50, blur: 0.5, saturation: 165 });
-  LG.attachAll(".card, .section, .search-wrap, .list, .segmented");
-  LG.attachAll(".btn:not(.btn-plain)", { interactive: true, elasticity: 0.15 });
+  // Apple's Liquid Glass rules, applied here:
+  //  - glass only on the navigation layer that floats over the content (panel, zoom, toast, dialog);
+  //  - small controls use "clear" glass (almost no blur, strong lensing at the rim);
+  //  - large panels use "regular" glass (a bit more blur) and the cards inside carry legibility;
+  //  - no glass on glass: content inside the panel gets plain fills; only buttons get light & lift.
+  const REGULAR = { refract: true, mode: "shader", aberration: 1.5, saturation: 180, brightness: 1.06 };
+  const CLEAR = { ...REGULAR, blurPx: 3, brightness: 1.1 };
+  LG.attach(sidebar, { ...REGULAR, displacement: 70, blurPx: 10 });
+  LG.attach($(".leaflet-bar"), { ...CLEAR, displacement: 45 });
+  LG.attach($("#toast"), { ...CLEAR, displacement: 45 });
+  LG.attach($(".wiz-card"), { ...REGULAR, displacement: 60, blurPx: 14 });
+  LG.attachAll(".btn:not(.btn-plain)", { interactive: true, elasticity: 0.1 });
 
   // ---------- boot ----------
   setSeg("lang", lang);

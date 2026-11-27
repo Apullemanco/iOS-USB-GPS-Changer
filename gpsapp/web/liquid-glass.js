@@ -23,7 +23,9 @@
     mode: "standard",      // "standard" (pre-baked map) | "shader" (generated per element size)
     displacement: 70,      // displacementScale
     blur: 0.0625,          // blurAmount -> blur(4 + blur * 32 px)
+    blurPx: null,          // exact blur in px (overrides `blur`); Apple's "clear" glass is ~2-3 px
     saturation: 140,       // %
+    brightness: 1,         // backdrop brightness; Apple's light glass lifts what is behind it
     aberration: 2,         // chromatic aberration intensity
     elasticity: 0,         // 0 = static; 0.15 = original default for buttons
     interactive: false,    // hover / press highlights + press scale
@@ -131,7 +133,9 @@
       const { svg, image } = buildFilter(id, o);
       const warp = span("lg-warp");
       warp.style.filter = `url(#${id})`;
-      warp.style.backdropFilter = warp.style.webkitBackdropFilter = `blur(${4 + o.blur * 32}px) saturate(${o.saturation}%)`;
+      const blurPx = o.blurPx ?? 4 + o.blur * 32;
+      warp.style.backdropFilter = warp.style.webkitBackdropFilter =
+        `blur(${blurPx}px) saturate(${o.saturation}%) brightness(${o.brightness})`;
       // The tint must NOT be painted by the warp itself: the displacement filter would split
       // a semi-transparent tint into R/G/B and blend it back as gray (the original has no tint).
       layers.push(svg, warp, span("lg-tint"));
@@ -171,6 +175,9 @@
       s.setProperty("--lg-p2", Math.min(90, 66 + my * 0.4) + "%");
       s.setProperty("--lg-a1", 0.12 + k * 0.008); s.setProperty("--lg-a2", 0.4 + k * 0.012);
       s.setProperty("--lg-b1", 0.32 + k * 0.008); s.setProperty("--lg-b2", 0.6 + k * 0.012);
+      // Pointer position inside the element: Apple's glass lights up where it is touched.
+      s.setProperty("--lg-x", ((last.x - r.left) / r.width) * 100 + "%");
+      s.setProperty("--lg-y", ((last.y - r.top) / r.height) * 100 + "%");
       if (o.elasticity > 0) {
         const dist = Math.hypot(dx, dy);
         s.translate = `${dx * o.elasticity * 0.1}px ${dy * o.elasticity * 0.1}px`;
@@ -185,10 +192,13 @@
     node.addEventListener("pointerleave", () => {
       last = null;
       node.classList.remove("lg-hovered", "lg-active");
-      ["--lg-ang", "--lg-p1", "--lg-p2", "--lg-a1", "--lg-a2", "--lg-b1", "--lg-b2", "translate", "scale"].forEach(p => node.style.removeProperty(p));
+      ["--lg-ang", "--lg-p1", "--lg-p2", "--lg-a1", "--lg-a2", "--lg-b1", "--lg-b2", "--lg-x", "--lg-y", "translate", "scale"].forEach(p => node.style.removeProperty(p));
     });
     if (o.interactive) {
-      node.addEventListener("pointerdown", () => node.classList.add("lg-active"));
+      node.addEventListener("pointerdown", e => {
+        last = { x: e.clientX, y: e.clientY }; update();   // glow starts exactly under the finger
+        node.classList.add("lg-active");
+      });
       ["pointerup", "pointercancel"].forEach(ev => node.addEventListener(ev, () => node.classList.remove("lg-active")));
     }
     return node;
