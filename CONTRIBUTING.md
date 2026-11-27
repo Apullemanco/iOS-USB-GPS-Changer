@@ -13,3 +13,21 @@ Las mejoras, correcciones de errores y nuevas funciones son bienvenidas.
 - Conexión inalámbrica por Wi-Fi además de USB mediante túnel remoto.
 - Modo oscuro adaptable para la interfaz y el mapa.
 - Soporte multiplataforma para macOS y Linux (atajos globales y elevación de permisos sin depender de `ctypes.windll`).
+
+---
+
+## Contributing
+
+Improvements, bug fixes, and new features are welcome.
+
+### Workflow
+1. Fork this repository.
+2. Create a branch for your change (`git checkout -b feature/new-feature`).
+3. Test your changes by running `py GPS_App.py` as Administrator on Windows with an iOS 17+ device connected over USB.
+4. Commit your changes and open a Pull Request describing what you added or fixed.
+
+### Ideas to Contribute
+- Support for importing and exporting routes in KML format (in addition to GPX).
+- Wireless Wi-Fi connection alongside USB via remote tunnel.
+- Adaptive dark mode for the UI and map tiles.
+- Cross-platform support for macOS and Linux (global hotkeys and privilege elevation without relying on `ctypes.windll`).
